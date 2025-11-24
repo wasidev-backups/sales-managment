@@ -325,8 +325,11 @@
         }, 300);
       });
     }
-    if (typeof window.loadDeptSalesList === 'function') window.loadDeptSalesList();
-    else if (typeof loadDeptSalesList === 'function') loadDeptSalesList();
+    var hasTokenInit = !!localStorage.getItem('authToken');
+    if (hasTokenInit) {
+      if (typeof window.loadDeptSalesList === 'function') window.loadDeptSalesList();
+      else if (typeof loadDeptSalesList === 'function') loadDeptSalesList();
+    }
   }
 
   document.addEventListener('sectionLoaded', function(e){
@@ -345,6 +348,8 @@
     if (window.appData && Array.isArray(appData.branches) && appData.branches.length){
       setOptions(appData.branches);
     } else if (window.api && typeof window.api.getBranches === 'function'){
+      var hasToken = !!localStorage.getItem('authToken');
+      if (!hasToken) { setOptions([]); return; }
       window.api.getBranches().then(function(branches){
         if (window.appData) appData.branches = branches;
         setOptions(branches);

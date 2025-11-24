@@ -20939,6 +20939,8 @@ sortedBranches.forEach(data => {
         // ========================================
         
         function loadDepartmentBranches() {
+            const hasToken = !!localStorage.getItem('authToken');
+            if (!hasToken) { return; }
             console.log('🔄 Loading department branches...');
             api.getBranches().then(allBranches => {
                 console.log('📊 All branches loaded:', allBranches?.length || 0, 'items');
@@ -22516,6 +22518,10 @@ sortedBranches.forEach(data => {
         
         // Load Department Sales List
         function loadDeptSalesList(page = 1, perPage = 10) {
+            const hasToken = !!localStorage.getItem('authToken');
+            if (!hasToken) {
+                return;
+            }
             // Get filter values
             const dateFrom = document.getElementById('deptSalesListDateFrom')?.value || '';
             const dateTo = document.getElementById('deptSalesListDateTo')?.value || '';
@@ -35925,24 +35931,26 @@ sortedBranches.forEach(data => {
             
             // Then load from server settings and apply if different
             if (window.api && typeof window.api.getSettings === 'function') {
-                window.api.getSettings().then(settingsData => {
-                    if (settingsData && settingsData.theme) {
-                        applyTheme(settingsData.theme);
-                        // Update dropdown if it exists
-                        const appThemeSelectEl = document.getElementById('appThemeSelect');
-                        if (appThemeSelectEl) {
-                            appThemeSelectEl.value = settingsData.theme;
+                const hasToken = !!localStorage.getItem('authToken');
+                if (hasToken) {
+                    window.api.getSettings().then(settingsData => {
+                        if (settingsData && settingsData.theme) {
+                            applyTheme(settingsData.theme);
+                            const appThemeSelectEl = document.getElementById('appThemeSelect');
+                            if (appThemeSelectEl) {
+                                appThemeSelectEl.value = settingsData.theme;
+                            }
+                        } else if (!savedTheme) {
+                            applyTheme('light');
                         }
-                    } else if (!savedTheme) {
-                        // Default to light if no theme is set
-                        applyTheme('light');
-                    }
-                }).catch(err => {
-                    console.log('Settings not loaded yet, using default theme');
-                    if (!savedTheme) {
-                        applyTheme('light');
-                    }
-                });
+                    }).catch(err => {
+                        if (!savedTheme) {
+                            applyTheme('light');
+                        }
+                    });
+                } else if (!savedTheme) {
+                    applyTheme('light');
+                }
             } else if (!savedTheme) {
                 // Default to light if API not available
                 applyTheme('light');
