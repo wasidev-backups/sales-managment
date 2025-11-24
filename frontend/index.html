@@ -420,11 +420,15 @@
         }
         body.theme-redblue,
         html.theme-redblue {
+            /* Logo-matching palette */
+            --primary-color: #1155AA;
+            --secondary-color: #1C6FD6;
+            --accent-red: #E31B23;
             background-color: #0f172a;
             color: #ffffff;
         }
         body.theme-redblue .navbar {
-            background-color: #0b3c8a !important;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
         }
         body.theme-redblue .card {
             background-color: #13243f;
@@ -432,7 +436,7 @@
             border-color: #1f3b66;
         }
         body.theme-redblue .card-header {
-            background-color: #c62828 !important;
+            background-color: var(--accent-red) !important;
             color: #ffffff !important;
         }
         body.theme-redblue .card-title,
@@ -442,19 +446,18 @@
             color: #ffffff !important;
         }
         body.theme-redblue .section-title i {
-            color: #c62828 !important;
+            color: var(--accent-red) !important;
         }
         body.theme-redblue .btn-primary {
-            background-color: #1e3a8a;
-            border-color: #1e3a8a;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            border: none;
             color: #ffffff;
         }
         body.theme-redblue .btn-primary:hover {
-            background-color: #172a6a;
-            border-color: #172a6a;
+            filter: brightness(0.95);
         }
         body.theme-redblue .table thead {
-            background-color: #c62828;
+            background-color: var(--accent-red);
             color: #ffffff;
         }
         body.theme-redblue .form-control,
@@ -464,7 +467,7 @@
             border-color: #334155;
         }
         body.theme-redblue .sidebar {
-            background-color: #0b3c8a;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
         }
         body.theme-redblue .sidebar-title,
         body.theme-redblue .sidebar-logo,
@@ -472,7 +475,7 @@
             color: #ffffff !important;
         }
         body.theme-redblue .sidebar-section-header {
-            background-color: #c62828;
+            background-color: var(--accent-red);
             color: #ffffff;
         }
         body.theme-redblue .sidebar .nav-link {
@@ -484,6 +487,42 @@
         body.theme-redblue .sidebar .nav-link.active {
             background-color: rgba(255, 255, 255, 0.12);
             color: #ffffff;
+        }
+        body.theme-redblue .login-section {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+        }
+        body.theme-redblue .login-card {
+            background: #ffffff;
+            border-color: transparent;
+        }
+        body.theme-redblue .login-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: #ffffff;
+        }
+        body.theme-redblue .login-form .form-control {
+            background: #ffffff;
+            color: #212529;
+            border: 1px solid #ddd;
+        }
+        body.theme-redblue .login-form .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(44, 110, 138, 0.25);
+        }
+        body.theme-redblue .login-btn {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: #ffffff;
+            border: none;
+        }
+        body.theme-redblue .auth-toggle {
+            background: #f8f9fa;
+        }
+        body.theme-redblue .toggle-btn {
+            color: #6c757d;
+        }
+        body.theme-redblue .toggle-btn.active {
+            background: #ffffff;
+            color: var(--primary-color);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
         body.theme-redblue #warehouseComparisonChart,
         body.theme-redblue #shopBranchComparisonChart {
@@ -36210,6 +36249,12 @@ sortedBranches.forEach(data => {
                             }
                         } else if (!savedTheme) {
                             applyTheme('light');
+                        }
+                        // Apply logo if available
+                        if (settingsData && settingsData.logoUrl) {
+                            document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => {
+                                try { img.src = settingsData.logoUrl; } catch(e) {}
+                            });
                         }
                     }).catch(err => {
                         if (!savedTheme) {

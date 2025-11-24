@@ -28,6 +28,27 @@
     
     if (typeof window.loadSettings === 'function') window.loadSettings();
     else if (typeof loadSettings === 'function') loadSettings();
+
+    // Setup logo file input listener
+    setTimeout(() => {
+      const appLogoFileEl = document.getElementById('appLogoFile');
+      if (appLogoFileEl) {
+        const newFileEl = appLogoFileEl.cloneNode(true);
+        appLogoFileEl.parentNode.replaceChild(newFileEl, appLogoFileEl);
+        newFileEl.addEventListener('change', function(e){
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = function(ev){
+            const dataUrl = ev.target.result;
+            window.__pendingLogoDataUrl = dataUrl;
+            document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => { try { img.src = dataUrl; } catch(e) {} });
+            if (typeof showNotification === 'function') showNotification('Logo selected. Save settings to apply permanently.', 'info');
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+    }, 100);
   }
 
   function initApiKeyEventListeners() {
@@ -155,6 +176,13 @@
         if (typeof applyTheme === 'function') {
           applyTheme(settingsData.theme || 'light');
         }
+      }
+
+      // Apply Logo
+      if (settingsData.logoUrl) {
+        document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => {
+          try { img.src = settingsData.logoUrl; } catch(e) {}
+        });
       }
     }).catch(error => { 
       console.error('Error loading settings:', error); 
@@ -307,7 +335,8 @@
       dateFormat: dateFormatEl ? dateFormatEl.value : 'DD/MM/YYYY',
       itemsPerPage: itemsPerPage,
       defaultCostPercent: defaultCostPercent,
-      theme: appThemeSelectEl ? appThemeSelectEl.value : 'light'
+      theme: appThemeSelectEl ? appThemeSelectEl.value : 'light',
+      logoUrl: window.__pendingLogoDataUrl || (appData.settings && appData.settings.logoUrl) || ''
     }; 
     
     // Show loading notification
@@ -323,6 +352,13 @@
       // Apply theme immediately after saving
       if (settingsData.theme && typeof applyTheme === 'function') {
         applyTheme(settingsData.theme);
+      }
+
+      // Apply logo immediately after saving
+      if (settingsData.logoUrl) {
+        document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => {
+          try { img.src = settingsData.logoUrl; } catch(e) {}
+        });
       }
       
       if (typeof showNotification === 'function') {

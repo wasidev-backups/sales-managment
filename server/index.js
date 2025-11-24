@@ -693,7 +693,8 @@ app.put('/api/settings', authenticate, isAdmin, checkDatabaseConnection, async (
       dateFormat: req.body.dateFormat ?? 'DD/MM/YYYY',
       itemsPerPage: Number(req.body.itemsPerPage ?? 10),
       defaultCostPercent: req.body.defaultCostPercent !== undefined ? Number(req.body.defaultCostPercent) : undefined,
-      theme: req.body.theme ?? 'light'
+      theme: req.body.theme ?? 'light',
+      logoUrl: typeof req.body.logoUrl === 'string' ? req.body.logoUrl : undefined
     };
     
     // Remove undefined to avoid overwriting with undefined
