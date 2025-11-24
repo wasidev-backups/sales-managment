@@ -326,21 +326,33 @@ async function handleSignup(event) {
 }
 
 function switchToLogin() {
-  document.getElementById('loginForm').classList.remove('d-none');
-  document.getElementById('signupForm').classList.add('d-none');
-  document.getElementById('loginToggle').classList.add('active');
-  document.getElementById('signupToggle').classList.remove('active');
-  document.getElementById('loginError').classList.add('d-none');
-  document.getElementById('signupError').classList.add('d-none');
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  const loginToggle = document.getElementById('loginToggle');
+  const signupToggle = document.getElementById('signupToggle');
+  const loginError = document.getElementById('loginError');
+  const signupError = document.getElementById('signupError');
+  if (loginForm) loginForm.classList.remove('d-none');
+  if (signupForm) signupForm.classList.add('d-none');
+  if (loginToggle) loginToggle.classList.add('active');
+  if (signupToggle) signupToggle.classList.remove('active');
+  if (loginError) loginError.classList.add('d-none');
+  if (signupError) signupError.classList.add('d-none');
 }
 
 function switchToSignup() {
-  document.getElementById('loginForm').classList.add('d-none');
-  document.getElementById('signupForm').classList.remove('d-none');
-  document.getElementById('loginToggle').classList.remove('active');
-  document.getElementById('signupToggle').classList.add('active');
-  document.getElementById('loginError').classList.add('d-none');
-  document.getElementById('signupError').classList.add('d-none');
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  const loginToggle = document.getElementById('loginToggle');
+  const signupToggle = document.getElementById('signupToggle');
+  const loginError = document.getElementById('loginError');
+  const signupError = document.getElementById('signupError');
+  if (loginForm) loginForm.classList.add('d-none');
+  if (signupForm) signupForm.classList.remove('d-none');
+  if (loginToggle) loginToggle.classList.remove('active');
+  if (signupToggle) signupToggle.classList.add('active');
+  if (loginError) loginError.classList.add('d-none');
+  if (signupError) signupError.classList.add('d-none');
 }
 
 function showLoginSection() {
