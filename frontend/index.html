@@ -10420,11 +10420,14 @@
                 
                 // Prepare headers
                 const headers = {
-                    'Content-Type': 'application/json',
                     'Cache-Control': 'no-cache',
                     'Pragma': 'no-cache',
                     ...options.headers
                 };
+                // Only set JSON Content-Type if not sending FormData
+                if (!(options.body instanceof FormData)) {
+                    headers['Content-Type'] = 'application/json';
+                }
                 
                 // Add authorization header if token exists
                 if (this.token) {
@@ -10569,6 +10572,24 @@
                 return this.request('/settings', {
                     method: 'PUT',
                     body: JSON.stringify(settings)
+                });
+            }
+
+            async uploadLogo(dataUrl, fileName = 'dw-logo') {
+                return this.request('/upload/logo', {
+                    method: 'POST',
+                    body: JSON.stringify({ dataUrl, fileName })
+                });
+            }
+
+            async uploadLogoFile(file, fileName = 'dw-logo') {
+                const form = new FormData();
+                form.append('logo', file, file.name);
+                form.append('fileName', fileName);
+                return this.request('/upload/logo', {
+                    method: 'POST',
+                    body: form,
+                    headers: {}
                 });
             }
             

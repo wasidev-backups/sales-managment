@@ -38,14 +38,12 @@
         newFileEl.addEventListener('change', function(e){
           const file = e.target.files && e.target.files[0];
           if (!file) return;
-          const reader = new FileReader();
-          reader.onload = function(ev){
-            const dataUrl = ev.target.result;
-            window.__pendingLogoDataUrl = dataUrl;
-            document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => { try { img.src = dataUrl; } catch(e) {} });
-            if (typeof showNotification === 'function') showNotification('Logo selected. Save settings to apply permanently.', 'info');
-          };
-          reader.readAsDataURL(file);
+          window.__pendingLogoFile = file;
+          try {
+            const previewUrl = URL.createObjectURL(file);
+            document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => { try { img.src = previewUrl; } catch(e) {} });
+          } catch (err) {}
+          if (typeof showNotification === 'function') showNotification('Logo selected. Save settings to apply permanently.', 'info');
         });
       }
     }, 100);
@@ -293,7 +291,7 @@
     btn.innerHTML = '<i class="fas fa-plus me-2"></i>Create API Key'; 
   }
 
-  function saveSettings() { 
+  async function saveSettings() { 
     if (typeof isAdmin === 'function' && !isAdmin()) { 
       if (typeof showNotification === 'function') showNotification('You need admin privileges to update settings', 'error'); 
       return; 
@@ -328,7 +326,31 @@
       return;
     }
     
-    // Build settings data object
+    let logoUrl = (appData.settings && appData.settings.logoUrl) || '';
+    if (window.__pendingLogoFile) {
+      try {
+        const uploaded = await api.uploadLogoFile(window.__pendingLogoFile, 'dw-logo');
+        if (uploaded && uploaded.url) {
+          logoUrl = uploaded.url;
+        }
+      } catch (e) {
+        if (typeof showNotification === 'function') {
+          showNotification('Failed to upload logo: ' + (e.message || e), 'error');
+        }
+      }
+    } else if (window.__pendingLogoDataUrl) {
+      // Fallback to dataUrl upload if present
+      try {
+        const uploaded = await api.uploadLogo(window.__pendingLogoDataUrl, 'dw-logo');
+        if (uploaded && uploaded.url) {
+          logoUrl = uploaded.url;
+        }
+      } catch (e) {
+        if (typeof showNotification === 'function') {
+          showNotification('Failed to upload logo: ' + (e.message || e), 'error');
+        }
+      }
+    }
     const settingsData = { 
       companyName: companyNameEl ? companyNameEl.value.trim() : 'D.Watson Group of Pharmacy',
       currency: currencyEl ? currencyEl.value : '',
@@ -336,7 +358,7 @@
       itemsPerPage: itemsPerPage,
       defaultCostPercent: defaultCostPercent,
       theme: appThemeSelectEl ? appThemeSelectEl.value : 'light',
-      logoUrl: window.__pendingLogoDataUrl || (appData.settings && appData.settings.logoUrl) || ''
+      logoUrl: logoUrl
     }; 
     
     // Show loading notification
@@ -344,32 +366,26 @@
       showNotification('Saving settings...', 'info');
     }
     
-    // Save to backend
-    api.updateSettings(settingsData).then((savedSettings) => {
-      // Update appData with saved settings
+    try {
+      const savedSettings = await api.updateSettings(settingsData);
       appData.settings = savedSettings;
-      
-      // Apply theme immediately after saving
       if (settingsData.theme && typeof applyTheme === 'function') {
         applyTheme(settingsData.theme);
       }
-
-      // Apply logo immediately after saving
       if (settingsData.logoUrl) {
         document.querySelectorAll('.navbar-logo, .login-logo').forEach(img => {
           try { img.src = settingsData.logoUrl; } catch(e) {}
         });
       }
-      
       if (typeof showNotification === 'function') {
         showNotification('Settings saved successfully!', 'success');
       }
-    }).catch(error => { 
-      console.error('Error saving settings:', error); 
+    } catch (error) {
+      console.error('Error saving settings:', error);
       if (typeof showNotification === 'function') {
         showNotification('Failed to save settings: ' + (error.message || error), 'error');
       }
-    }); 
+    }
   }
 
   function backupData() {
