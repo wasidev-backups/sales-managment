@@ -522,6 +522,12 @@
       const newDept = deptSelect.cloneNode(true);
       deptSelect.parentNode.replaceChild(newDept, deptSelect);
       newDept.addEventListener('change', function(){
+        console.log('🔄 Department changed, current value:', newDept.value);
+        try {
+          localStorage.setItem('shopSale.departmentId', newDept.value || '');
+          const txt = newDept.options[newDept.selectedIndex] ? newDept.options[newDept.selectedIndex].text : '';
+          localStorage.setItem('shopSale.departmentName', txt || '');
+        } catch(e) {}
         loadSubDepartmentsForBulkSalesTab2();
       });
     }
@@ -612,15 +618,15 @@
         
         console.log('📋 Previous branch state:', { value: previousValue, text: previousText });
         
-        // Clear and repopulate dropdown
         branchSelect.innerHTML = '<option value="">Select Branch</option>';
         userBranches.forEach(function(br){
-          if (!br || !br._id || !br.name) {
+          if (!br || (!br._id && !br.id) || !br.name) {
             console.warn('⚠️ Invalid branch object:', br);
             return;
           }
+          const id = br._id || br.id;
           const opt = document.createElement('option');
-          opt.value = br._id;
+          opt.value = id;
           opt.textContent = br.name;
           branchSelect.appendChild(opt);
         });
@@ -628,6 +634,12 @@
         console.log('✅ Populated', userBranches.length, 'branches in dropdown');
         
         let resolvedId = '';
+        const savedBranchId = (localStorage.getItem('shopSale.branchId') || '').trim();
+        const savedBranchName = (localStorage.getItem('shopSale.branchName') || '').trim().toLowerCase();
+        if (/^[a-fA-F0-9]{24}$/.test(savedBranchId)) {
+          const existsSaved = userBranches.find(function(br){ return (br._id || br.id) === savedBranchId; });
+          if (existsSaved) resolvedId = savedBranchId;
+        }
         if (/^[a-fA-F0-9]{24}$/.test(previousValue)) {
           // Check if the previous value still exists in the new branch list
           const branchExists = userBranches.find(function(br){ return br._id === previousValue; });
@@ -635,12 +647,16 @@
             resolvedId = previousValue;
             console.log('✅ Resolved branch ID from previous value:', resolvedId);
           }
-        } else if (previousText) {
+        } else if (!resolvedId && previousText) {
           const matchByText = userBranches.find(function(br){ return (br.name || '').trim().toLowerCase() === previousText.trim().toLowerCase(); });
           if (matchByText) {
             resolvedId = matchByText._id;
             console.log('✅ Resolved branch ID from previous text:', resolvedId);
           }
+        }
+        if (!resolvedId && savedBranchName) {
+          const matchSavedByText = userBranches.find(function(br){ return (br.name || '').trim().toLowerCase() === savedBranchName; });
+          if (matchSavedByText) resolvedId = matchSavedByText._id || matchSavedByText.id;
         }
         
         // If no resolved ID but only one branch, auto-select it
@@ -653,6 +669,11 @@
         if (resolvedId) {
           branchSelect.value = resolvedId;
           console.log('✅ Branch selected:', resolvedId);
+          try {
+            localStorage.setItem('shopSale.branchId', resolvedId);
+            const txt = branchSelect.options[branchSelect.selectedIndex] ? branchSelect.options[branchSelect.selectedIndex].text : '';
+            localStorage.setItem('shopSale.branchName', txt || '');
+          } catch(e) {}
           
           // Try to dispatch change event
           try {
@@ -730,9 +751,48 @@
                 console.warn('⚠️ Selected branch not found in user branches list:', currentValue);
               }
             } else {
+              if (!currentValue && userBranches.length > 0) {
+                const firstId = userBranches[0]._id || userBranches[0].id;
+                if (firstId) {
+                  branchSelect.value = firstId;
+                  try {
+                    localStorage.setItem('shopSale.branchId', firstId);
+                    const txt = branchSelect.options[branchSelect.selectedIndex] ? branchSelect.options[branchSelect.selectedIndex].text : '';
+                    localStorage.setItem('shopSale.branchName', txt || '');
+                  } catch(e) {}
+                  try {
+                    const changeEvent = new Event('change', { bubbles: true });
+                    branchSelect.dispatchEvent(changeEvent);
+                  } catch(e) {}
+                  setTimeout(function() {
+                    const loadDeptFunc = (typeof window.loadDepartmentsForBulkSalesTab2 === 'function') 
+                      ? window.loadDepartmentsForBulkSalesTab2 
+                      : (typeof loadDepartmentsForBulkSalesTab2 === 'function') 
+                        ? loadDepartmentsForBulkSalesTab2 
+                        : null;
+                    if (loadDeptFunc) loadDeptFunc();
+                  }, 100);
+                }
+              }
               console.log('ℹ️ No branch selected yet. Departments will load when branch is selected.');
             }
           }, 200);
+        }
+
+        if (!window.__shopSaleBranchBound) {
+          const prevValue2 = branchSelect.value || '';
+          const clone = branchSelect.cloneNode(true);
+          branchSelect.parentNode.replaceChild(clone, branchSelect);
+          if (prevValue2) clone.value = prevValue2;
+          clone.addEventListener('change', function(){
+            try {
+              localStorage.setItem('shopSale.branchId', clone.value || '');
+              const txt = clone.options[clone.selectedIndex] ? clone.options[clone.selectedIndex].text : '';
+              localStorage.setItem('shopSale.branchName', txt || '');
+            } catch(e) {}
+            if (typeof window.loadDepartmentsForBulkSalesTab2 === 'function') window.loadDepartmentsForBulkSalesTab2();
+          });
+          window.__shopSaleBranchBound = true;
         }
       }).catch(function(err){
         console.error('❌ Error loading branches:', err);
@@ -828,133 +888,202 @@
   
   function loadDepartmentsInternal(branchSelect, departmentSelect, container, apiInstance, onComplete){
     let branchId = (branchSelect.value || '').trim();
+    const __token = String(Date.now()) + '-' + String(Math.random());
+    window.__deptLoadToken = __token;
+    const __apply = function(cb){ if (window.__deptLoadToken === __token) { try { cb(); } catch(e){} } };
     if (!/^[a-fA-F0-9]{24}$/.test(branchId)) {
       const branches = (window.appData && Array.isArray(appData.branches)) ? appData.branches : [];
-      const match = branches.find(function(b){ return (b.name || '').trim().toLowerCase() === branchId.trim().toLowerCase(); });
+      let match = null;
+      if (branches.length) {
+        match = branches.find(function(b){ return (b.name || '').trim().toLowerCase() === branchId.trim().toLowerCase(); });
+      }
+      if (!match && branchId) {
+        // Fallback: fetch branches from API to resolve name→_id mapping, then re-run
+        if (typeof apiInstance.getBranches === 'function') {
+          apiInstance.getBranches().then(function(fetched){
+            if (Array.isArray(fetched) && fetched.length) {
+              if (window.appData) appData.branches = fetched;
+              const m2 = fetched.find(function(b){ return (b.name || '').trim().toLowerCase() === branchId.trim().toLowerCase(); });
+              if (m2) {
+                branchSelect.value = m2._id;
+                // Re-run with resolved ID
+                loadDepartmentsInternal(branchSelect, departmentSelect, container, apiInstance, onComplete);
+                return;
+              }
+            }
+            // Proceed without mapping if no match
+            proceed();
+          }).catch(function(){ proceed(); });
+          // Stop current flow; it will continue in the promise above
+          return;
+        }
+      }
       if (match) {
         branchId = match._id;
         branchSelect.value = match._id;
       }
     }
-    if (!branchId){
-      departmentSelect.innerHTML = '<option value="" selected disabled>Select Department</option>';
-      departmentSelect.disabled = false;
-      if (container) container.innerHTML = '<div class="alert alert-info"><i class="fas fa-info-circle me-2"></i>Please select a branch and department to load sub-departments</div>';
-      return;
-    }
-    
-    // Show loading state
-    departmentSelect.innerHTML = '<option value="">Loading departments...</option>';
-    departmentSelect.disabled = true;
-    if (container) {
-      container.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin me-2"></i>Loading departments...</div>';
-    }
-    
-    try { console.log('🔄 Loading departments for branch:', branchId); } catch(e) {}
-    
-    // Ensure API method exists
-    if (!apiInstance || typeof apiInstance.getDepartments !== 'function') {
-      console.error('❌ API instance or getDepartments method not available');
-      departmentSelect.innerHTML = '<option value="" selected disabled>Error: API method not available</option>';
-      departmentSelect.disabled = false;
-      if (container) {
-        container.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-circle me-2"></i>Error: API method not available</div>';
-      }
-      return;
-    }
-    apiInstance.getDepartments(branchId).then(function(departments){
-      try { 
-        console.log('✅ Departments loaded:', Array.isArray(departments) ? departments.length : 0);
-        if (!Array.isArray(departments)) {
-          console.error('❌ Departments response is not an array:', departments);
-        }
-      } catch(e) {}
-      if (Array.isArray(departments) && departments.length) {
-        fillDepartments(departments, departmentSelect, container, onComplete);
+    function proceed(){
+      if (!branchId){
+        departmentSelect.innerHTML = '<option value="" selected disabled>Select Department</option>';
+        departmentSelect.disabled = false;
+        if (container) container.innerHTML = '<div class="alert alert-info"><i class="fas fa-info-circle me-2"></i>Please select a branch and department to load sub-departments</div>';
         return;
       }
-      (typeof apiInstance.getDepartmentsByBranch === 'function' ? apiInstance.getDepartmentsByBranch(branchId) : Promise.reject()).then(function(deptsByBranch){
+      // Show loading state
+      departmentSelect.innerHTML = '<option value="">Loading departments...</option>';
+      departmentSelect.disabled = true;
+      if (container) {
+        container.innerHTML = '<div class="text-center p-3"><i class="fas fa-spinner fa-spin me-2"></i>Loading departments...</div>';
+      }
+      try { console.log('🔄 Loading departments for branch:', branchId); } catch(e) {}
+      // Ensure API method exists
+      if (!apiInstance || typeof apiInstance.getDepartments !== 'function') {
+        console.error('❌ API instance or getDepartments method not available');
+        departmentSelect.innerHTML = '<option value="" selected disabled>Error: API method not available</option>';
+        departmentSelect.disabled = false;
+        if (container) {
+          container.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-circle me-2"></i>Error: API method not available</div>';
+        }
+        return;
+      }
+      apiInstance.getDepartments(branchId).then(function(departments){
         try { 
-          console.log('✅ Departments loaded by branch route:', Array.isArray(deptsByBranch) ? deptsByBranch.length : 0); 
+          console.log('✅ Departments loaded:', Array.isArray(departments) ? departments.length : 0);
+          if (!Array.isArray(departments)) {
+            console.error('❌ Departments response is not an array:', departments);
+          }
         } catch(e) {}
-        if (Array.isArray(deptsByBranch) && deptsByBranch.length) {
-          fillDepartments(deptsByBranch, departmentSelect, container);
+        if (Array.isArray(departments) && departments.length) {
+          __apply(function(){ fillDepartments(departments, departmentSelect, container, onComplete); });
           return;
         }
-        apiInstance.getDepartments().then(function(allDepts){
-          const filtered = (allDepts || []).filter(function(d){
-            const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
-            return String(bid) === String(branchId);
-          });
-          try { console.log('✅ Departments loaded via all-departments fallback:', filtered.length); } catch(e) {}
-          fillDepartments(filtered, departmentSelect, container);
-        }).catch(function(err){
-          console.error('❌ Error loading departments (fallback):', err);
-          departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>';
-          departmentSelect.disabled = false;
-          const errorMsg = err.message || err.error || 'Unknown error';
-          if (typeof showNotification === 'function') {
-            showNotification('Failed to load departments: ' + errorMsg + (err.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
+        (typeof apiInstance.getDepartmentsByBranch === 'function' ? apiInstance.getDepartmentsByBranch(branchId) : Promise.reject()).then(function(deptsByBranch){
+          try { 
+            console.log('✅ Departments loaded by branch route:', Array.isArray(deptsByBranch) ? deptsByBranch.length : 0); 
+          } catch(e) {}
+          if (Array.isArray(deptsByBranch) && deptsByBranch.length) {
+            __apply(function(){ fillDepartments(deptsByBranch, departmentSelect, container); });
+            return;
           }
+          apiInstance.getDepartments().then(function(allDepts){
+            let filtered = (allDepts || []).filter(function(d){
+              const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
+              return String(bid) === String(branchId);
+            });
+            if ((!filtered || filtered.length === 0) && branchSelect && branchSelect.selectedIndex >= 0) {
+              const branchName = (branchSelect.options[branchSelect.selectedIndex].text || '').trim().toLowerCase();
+              filtered = (allDepts || []).filter(function(d){
+                const bname = (d.branchId && d.branchId.name) ? d.branchId.name : '';
+                return (bname || '').trim().toLowerCase() === branchName;
+              });
+              try { console.log('🔄 Fallback by branch name matched departments:', filtered.length); } catch(e) {}
+            }
+            try { console.log('✅ Departments loaded via all-departments fallback:', filtered.length); } catch(e) {}
+            __apply(function(){ fillDepartments(filtered, departmentSelect, container); });
+          }).catch(function(err){
+            console.error('❌ Error loading departments (fallback):', err);
+            __apply(function(){ departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>'; departmentSelect.disabled = false; });
+            const errorMsg = err.message || err.error || 'Unknown error';
+            if (typeof showNotification === 'function') {
+              showNotification('Failed to load departments: ' + errorMsg + (err.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
+            }
+          });
+        }).catch(function(err){
+          console.error('❌ Error in getDepartmentsByBranch fallback:', err);
+          apiInstance.getDepartments().then(function(allDepts){
+            let filtered = (allDepts || []).filter(function(d){
+              const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
+              return String(bid) === String(branchId);
+            });
+            if ((!filtered || filtered.length === 0) && branchSelect && branchSelect.selectedIndex >= 0) {
+              const branchName = (branchSelect.options[branchSelect.selectedIndex].text || '').trim().toLowerCase();
+              filtered = (allDepts || []).filter(function(d){
+                const bname = (d.branchId && d.branchId.name) ? d.branchId.name : '';
+                return (bname || '').trim().toLowerCase() === branchName;
+              });
+              try { console.log('🔄 Fallback by branch name matched departments (inner):', filtered.length); } catch(e) {}
+            }
+            try { console.log('✅ Departments loaded via all-departments fallback (inner):', filtered.length); } catch(e) {}
+            __apply(function(){ fillDepartments(filtered, departmentSelect, container); });
+          }).catch(function(err2){
+            console.error('❌ Error in all-departments fallback (inner):', err2);
+            // Final fallback: use cached departments from Department Management
+            const cached = (window.appData && Array.isArray(appData.departments)) ? appData.departments : [];
+            const filteredCached = cached.filter(function(d){
+              const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
+              return String(bid) === String(branchId);
+            });
+            try { console.log('📦 Departments loaded from cache (inner):', filteredCached.length); } catch(e) {}
+            if (filteredCached.length) {
+              __apply(function(){ fillDepartments(filteredCached, departmentSelect, container); });
+            } else {
+              __apply(function(){ departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>'; departmentSelect.disabled = false; });
+              const errorMsg = err2.message || err2.error || 'Unknown error';
+              if (typeof showNotification === 'function') {
+                showNotification('Failed to load departments: ' + errorMsg + (err2.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
+              }
+            }
+          });
         });
       }).catch(function(err){
-        console.error('❌ Error in getDepartmentsByBranch fallback:', err);
-        apiInstance.getDepartments().then(function(allDepts){
-          const filtered = (allDepts || []).filter(function(d){
-            const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
-            return String(bid) === String(branchId);
-          });
-          try { console.log('✅ Departments loaded via all-departments fallback (inner):', filtered.length); } catch(e) {}
-          fillDepartments(filtered, departmentSelect, container);
-        }).catch(function(err2){
-          console.error('❌ Error in all-departments fallback (inner):', err2);
-          // Final fallback: use cached departments from Department Management
-          const cached = (window.appData && Array.isArray(appData.departments)) ? appData.departments : [];
-          const filteredCached = cached.filter(function(d){
-            const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
-            return String(bid) === String(branchId);
-          });
-          try { console.log('📦 Departments loaded from cache (inner):', filteredCached.length); } catch(e) {}
-          if (filteredCached.length) {
-            fillDepartments(filteredCached, departmentSelect, container);
-          } else {
-            departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>';
-            departmentSelect.disabled = false;
+        console.error('❌ Error loading departments (primary):', err);
+        if (typeof apiInstance.getDepartmentsByBranch === 'function'){
+          apiInstance.getDepartmentsByBranch(branchId).then(function(departments){
+            try { 
+              console.log('✅ Departments loaded by branch route:', Array.isArray(departments) ? departments.length : 0); 
+            } catch(e) {}
+            __apply(function(){ fillDepartments(departments, departmentSelect, container, onComplete); });
+          }).catch(function(err2){
+            console.error('❌ Error loading departments by branch route:', err2);
+            __apply(function(){ departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>'; departmentSelect.disabled = false; });
             const errorMsg = err2.message || err2.error || 'Unknown error';
             if (typeof showNotification === 'function') {
               showNotification('Failed to load departments: ' + errorMsg + (err2.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
             }
-          }
-        });
-      });
-    }).catch(function(err){
-      console.error('❌ Error loading departments (primary):', err);
-      if (typeof apiInstance.getDepartmentsByBranch === 'function'){
-        apiInstance.getDepartmentsByBranch(branchId).then(function(departments){
-          try { 
-            console.log('✅ Departments loaded by branch route:', Array.isArray(departments) ? departments.length : 0); 
-          } catch(e) {}
-          fillDepartments(departments, departmentSelect, container, onComplete);
-        }).catch(function(err2){
-          console.error('❌ Error loading departments by branch route:', err2);
-          departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>';
-          departmentSelect.disabled = false;
-          const errorMsg = err2.message || err2.error || 'Unknown error';
-          if (typeof showNotification === 'function') {
-            showNotification('Failed to load departments: ' + errorMsg + (err2.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
-          }
-        });
-      } else {
-        apiInstance.getDepartments().then(function(allDepts){
-          const filtered = (allDepts || []).filter(function(d){
-            const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
-            return String(bid) === String(branchId);
           });
-          try { console.log('✅ Departments loaded via all-departments fallback (outer):', filtered.length); } catch(e) {}
-          if (filtered.length) {
-            fillDepartments(filtered, departmentSelect, container);
-          } else {
-            console.warn('⚠️ No departments found in all-departments fallback (outer)');
+        } else {
+          apiInstance.getDepartments().then(function(allDepts){
+            let filtered = (allDepts || []).filter(function(d){
+              const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
+              return String(bid) === String(branchId);
+            });
+            if ((!filtered || filtered.length === 0) && branchSelect && branchSelect.selectedIndex >= 0) {
+              const branchName = (branchSelect.options[branchSelect.selectedIndex].text || '').trim().toLowerCase();
+              filtered = (allDepts || []).filter(function(d){
+                const bname = (d.branchId && d.branchId.name) ? d.branchId.name : '';
+                return (bname || '').trim().toLowerCase() === branchName;
+              });
+              try { console.log('🔄 Fallback by branch name matched departments (outer):', filtered.length); } catch(e) {}
+            }
+            try { console.log('✅ Departments loaded via all-departments fallback (outer):', filtered.length); } catch(e) {}
+            if (filtered.length) {
+              __apply(function(){ fillDepartments(filtered, departmentSelect, container); });
+            } else {
+              const cached = (window.appData && Array.isArray(appData.departments)) ? appData.departments : [];
+              const filteredCached = cached.filter(function(d){
+                const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
+                return String(bid) === String(branchId);
+              });
+              if ((!filteredCached || filteredCached.length === 0) && branchSelect && branchSelect.selectedIndex >= 0) {
+                const branchName = (branchSelect.options[branchSelect.selectedIndex].text || '').trim().toLowerCase();
+                filteredCached = (cached || []).filter(function(d){
+                  const bname = (d.branchId && d.branchId.name) ? d.branchId.name : '';
+                  return (bname || '').trim().toLowerCase() === branchName;
+                });
+                try { console.log('📦 Departments loaded from cache by name (outer):', filteredCached.length); } catch(e) {}
+              } else {
+                try { console.log('📦 Departments loaded from cache (outer):', filteredCached.length); } catch(e) {}
+              }
+              if (filteredCached.length) {
+                __apply(function(){ fillDepartments(filteredCached, departmentSelect, container); });
+              } else {
+                __apply(function(){ departmentSelect.innerHTML = '<option value="" selected disabled>No departments found</option>'; departmentSelect.disabled = false; });
+                if (typeof showNotification === 'function') showNotification('No departments found for this branch. Please add departments first.', 'warning');
+              }
+            }
+          }).catch(function(err){
+            console.error('❌ Error in all-departments fallback (outer):', err);
             const cached = (window.appData && Array.isArray(appData.departments)) ? appData.departments : [];
             const filteredCached = cached.filter(function(d){
               const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
@@ -962,34 +1091,18 @@
             });
             try { console.log('📦 Departments loaded from cache (outer):', filteredCached.length); } catch(e) {}
             if (filteredCached.length) {
-              fillDepartments(filteredCached, departmentSelect, container);
+              __apply(function(){ fillDepartments(filteredCached, departmentSelect, container); });
             } else {
-              departmentSelect.innerHTML = '<option value="" selected disabled>No departments found</option>';
-              departmentSelect.disabled = false;
-              if (typeof showNotification === 'function') showNotification('No departments found for this branch. Please add departments first.', 'warning');
+              __apply(function(){ departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>'; departmentSelect.disabled = false; });
+              const errorMsg = err.message || err.error || 'Unknown error';
+              if (typeof showNotification === 'function') {
+                showNotification('Failed to load departments: ' + errorMsg + (err.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
+              }
             }
-          }
-        }).catch(function(err){
-          console.error('❌ Error in all-departments fallback (outer):', err);
-          const cached = (window.appData && Array.isArray(appData.departments)) ? appData.departments : [];
-          const filteredCached = cached.filter(function(d){
-            const bid = (d.branchId && (d.branchId._id || d.branchId)) || d.branchId;
-            return String(bid) === String(branchId);
           });
-          try { console.log('📦 Departments loaded from cache (outer):', filteredCached.length); } catch(e) {}
-          if (filteredCached.length) {
-            fillDepartments(filteredCached, departmentSelect, container);
-          } else {
-            departmentSelect.innerHTML = '<option value="" selected disabled>Error loading departments</option>';
-            departmentSelect.disabled = false;
-            const errorMsg = err.message || err.error || 'Unknown error';
-            if (typeof showNotification === 'function') {
-              showNotification('Failed to load departments: ' + errorMsg + (err.status === 'database_unavailable' ? ' (Database connection issue)' : ''), 'error');
-            }
-          }
-        });
-      }
-    });
+        }
+      });
+    }
   }
 
   function fillDepartments(departments, departmentSelect, container, onComplete){
@@ -1018,9 +1131,19 @@
       });
       departmentSelect.disabled = false;
       let resolvedDept = '';
+      const savedDeptId = (localStorage.getItem('shopSale.departmentId') || '').trim();
+      const savedDeptName = (localStorage.getItem('shopSale.departmentName') || '').trim().toLowerCase();
+      if (/^[a-fA-F0-9]{24}$/.test(savedDeptId)) {
+        const exists = departments.find(function(d){ return d._id === savedDeptId; });
+        if (exists) resolvedDept = savedDeptId;
+      }
       if (prevText) {
         const matchByText = departments.find(function(d){ return (d.name || '').trim().toLowerCase() === prevText.trim().toLowerCase(); });
         if (matchByText) resolvedDept = matchByText._id;
+      }
+      if (!resolvedDept && savedDeptName) {
+        const matchSaved = departments.find(function(d){ return (d.name || '').trim().toLowerCase() === savedDeptName; });
+        if (matchSaved) resolvedDept = matchSaved._id;
       }
       if (!resolvedDept && departments.length === 1) {
         resolvedDept = departments[0]._id;

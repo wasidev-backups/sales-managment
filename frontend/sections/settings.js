@@ -463,6 +463,9 @@
             `- Categories: ${restoredInfo.categories}\n` +
             `- Suppliers: ${restoredInfo.suppliers || 0}\n` +
             `- Users: ${restoredInfo.users}\n` +
+            `- Departments: ${restoredInfo.departments || 0}\n` +
+            `- Sub-Departments: ${restoredInfo.subDepartments || 0}\n` +
+            `- Department Sales: ${restoredInfo.departmentSales || 0}\n` +
             `- Sales: ${restoredInfo.sales}\n\n` +
             `Backup timestamp: ${response.timestamp || 'Unknown'}`;
           

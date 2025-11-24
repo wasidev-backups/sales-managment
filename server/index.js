@@ -782,6 +782,57 @@ app.post('/api/admin/restore', authenticate, isAdmin, checkDatabaseConnection, a
         }));
         await Branch.insertMany(branches, { session });
       }
+
+      if (backup.departmentsData && Array.isArray(backup.departmentsData)) {
+        const allBranches = await Branch.find({}).session(session);
+        const branchMap = new Map();
+        allBranches.forEach(b => branchMap.set(b.name, b._id));
+        const departments = [];
+        for (const d of backup.departmentsData) {
+          const bname = d.branchId?.name || d.branch?.name || d.branchName || '';
+          const bid = branchMap.get(bname);
+          if (!bid) continue;
+          departments.push({
+            name: d.name,
+            branchId: bid,
+            description: d.description || '',
+            isActive: d.isActive !== undefined ? d.isActive : true,
+            sequence: d.sequence !== undefined ? d.sequence : 0
+          });
+        }
+        if (departments.length > 0) {
+          await Department.insertMany(departments, { session });
+        }
+      }
+
+      if (backup.subDepartmentsData && Array.isArray(backup.subDepartmentsData)) {
+        const allBranches = await Branch.find({}).session(session);
+        const allDepartments = await Department.find({}).session(session);
+        const branchMap = new Map();
+        allBranches.forEach(b => branchMap.set(b.name, b._id));
+        const deptMap = new Map();
+        allDepartments.forEach(d => deptMap.set(`${d.branchId.toString()}|${d.name}`, d._id));
+        const subDepartments = [];
+        for (const sd of backup.subDepartmentsData) {
+          const bname = sd.branchId?.name || sd.branch?.name || sd.branchName || '';
+          const dname = sd.departmentId?.name || sd.department?.name || sd.departmentName || '';
+          const bid = branchMap.get(bname);
+          if (!bid) continue;
+          const did = deptMap.get(`${bid.toString()}|${dname}`);
+          if (!did) continue;
+          subDepartments.push({
+            name: sd.name,
+            departmentId: did,
+            branchId: bid,
+            description: sd.description || '',
+            isActive: sd.isActive !== undefined ? sd.isActive : true,
+            sequence: sd.sequence !== undefined ? sd.sequence : 0
+          });
+        }
+        if (subDepartments.length > 0) {
+          await SubDepartment.insertMany(subDepartments, { session });
+        }
+      }
       
       // Restore Categories (needed before Sales)
       if (backup.categoriesData && Array.isArray(backup.categoriesData)) {
@@ -902,6 +953,48 @@ app.post('/api/admin/restore', authenticate, isAdmin, checkDatabaseConnection, a
           await Sale.insertMany(sales, { session });
         }
       }
+
+      if (backup.departmentSalesData && Array.isArray(backup.departmentSalesData)) {
+        const allBranches = await Branch.find({}).session(session);
+        const allDepartments = await Department.find({}).session(session);
+        const allSubDepartments = await SubDepartment.find({}).session(session);
+        const branchMap = new Map();
+        allBranches.forEach(b => branchMap.set(b.name, b._id));
+        const deptKey = new Map();
+        allDepartments.forEach(d => deptKey.set(`${d.branchId.toString()}|${d.name}`, d._id));
+        const subKey = new Map();
+        allSubDepartments.forEach(sd => subKey.set(`${sd.branchId.toString()}|${sd.departmentId.toString()}|${sd.name}`, sd._id));
+        const depSales = [];
+        for (const ds of backup.departmentSalesData) {
+          const bname = ds.branchId?.name || ds.branch?.name || ds.branchName || '';
+          const dname = ds.departmentId?.name || ds.department?.name || ds.departmentName || '';
+          const sdname = ds.subDepartmentId?.name || ds.subDepartment?.name || ds.subDepartmentName || '';
+          const bid = branchMap.get(bname);
+          if (!bid) continue;
+          const did = deptKey.get(`${bid.toString()}|${dname}`);
+          if (!did) continue;
+          const sdid = subKey.get(`${bid.toString()}|${did.toString()}|${sdname}`);
+          if (!sdid) continue;
+          depSales.push({
+            branchId: bid,
+            departmentId: did,
+            subDepartmentId: sdid,
+            date: new Date(ds.date),
+            grossSale: ds.grossSale || 0,
+            discountAmount: ds.discountAmount || 0,
+            discountPercent: ds.discountPercent || 0,
+            saleValue: ds.saleValue || 0,
+            returnAmount: ds.returnAmount || 0,
+            gst: ds.gst || 0,
+            netSale: ds.netSale || 0,
+            subDepartmentTotal: ds.subDepartmentTotal || 0,
+            notes: ds.notes || ''
+          });
+        }
+        if (depSales.length > 0) {
+          await DepartmentSale.insertMany(depSales, { session });
+        }
+      }
       
       // Commit transaction
       await session.commitTransaction();
@@ -919,7 +1012,10 @@ app.post('/api/admin/restore', authenticate, isAdmin, checkDatabaseConnection, a
           categories: backup.categoriesData?.length || 0,
           suppliers: backup.suppliersData?.length || 0,
           users: backup.usersData?.length || 0,
-          sales: backup.salesData?.length || 0
+          sales: backup.salesData?.length || 0,
+          departments: backup.departmentsData?.length || 0,
+          subDepartments: backup.subDepartmentsData?.length || 0,
+          departmentSales: backup.departmentSalesData?.length || 0
         },
         timestamp: backup.timestamp || 'Unknown'
       });

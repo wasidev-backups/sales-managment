@@ -10627,7 +10627,7 @@
             
             // Branches
             async getBranches() {
-                return this.request('/branches');
+                return this.requestWithRetry('/branches');
             }
             
             async createBranch(branch) {
@@ -10742,10 +10742,10 @@
             // Departments
             async getDepartments(branchId = null) {
                 const endpoint = branchId ? `/departments?branchId=${branchId}` : '/departments';
-                return this.request(endpoint);
+                return this.requestWithRetry(endpoint);
             }
             async getDepartmentsByBranch(branchId) {
-                return this.request(`/branches/${branchId}/departments`);
+                return this.requestWithRetry(`/branches/${branchId}/departments`);
             }
             
             async getDepartment(id) {
@@ -10778,11 +10778,11 @@
                 if (filters.departmentId) queryParams.append('departmentId', filters.departmentId);
                 if (filters.branchId) queryParams.append('branchId', filters.branchId);
                 const queryString = queryParams.toString();
-                return this.request(`/sub-departments${queryString ? '?' + queryString : ''}`);
+                return this.requestWithRetry(`/sub-departments${queryString ? '?' + queryString : ''}`);
             }
             
             async getSubDepartmentsByDepartment(departmentId) {
-                return this.request(`/departments/${departmentId}/sub-departments`);
+                return this.requestWithRetry(`/departments/${departmentId}/sub-departments`);
             }
             
             async getSubDepartment(id) {
@@ -14342,13 +14342,20 @@
                     // Event handler for branch change is handled in sales.js to avoid conflicts
                     // Only add if not already handled by sales.js module
                     if (!window.__deptBranchChangeHandled) {
+                        const prevValue = bulkDeptSaleBranchTab2.value || '';
                         const branchClone = bulkDeptSaleBranchTab2.cloneNode(true);
                         bulkDeptSaleBranchTab2.parentNode.replaceChild(branchClone, bulkDeptSaleBranchTab2);
+                        if (prevValue) {
+                            branchClone.value = prevValue;
+                        }
                         branchClone.addEventListener('change', function() {
                             if (typeof window.loadDepartmentsForBulkSalesTab2 === 'function') {
                                 window.loadDepartmentsForBulkSalesTab2();
                             }
                         });
+                        if (branchClone.value) {
+                            try { branchClone.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                        }
                         window.__deptBranchChangeHandled = true;
                     }
                 }
