@@ -6398,6 +6398,9 @@
                     </span>
                 </a>
                 <div class="ms-auto d-flex align-items-center">
+                    <button class="btn btn-sm btn-outline-light me-2" type="button" id="voiceInputBtn" onclick="startVoiceInput()">
+                        <i class="fas fa-microphone"></i>
+                    </button>
                     <div class="user-menu-container">
                         <button class="btn btn-sm btn-outline-light" type="button" id="userDropdown">
                             <i class="fas fa-user-circle me-1"></i> <span id="currentUserDisplay">Admin</span>
@@ -36076,6 +36079,12 @@ sortedBranches.forEach(data => {
                     // Apply theme immediately when loaded
                     applyTheme(settingsData.theme || 'light');
                 }
+                const voiceLangEl = document.getElementById('voiceRecognitionLang');
+                if (voiceLangEl) {
+                    const savedVoiceLang = localStorage.getItem('voiceLang') || 'en-US';
+                    voiceLangEl.value = savedVoiceLang;
+                    window.voiceLang = savedVoiceLang;
+                }
             }).catch(error => {
                 console.error('Error loading settings:', error);
                 showNotification('Failed to load settings: ' + error.message, 'error');
@@ -36323,6 +36332,490 @@ sortedBranches.forEach(data => {
         
         // Expose applyTheme globally
         window.applyTheme = applyTheme;
+        if (typeof window.__listening === 'undefined') { window.__listening = false; }
+        function startVoiceInput() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) { showNotification('Voice not supported in this browser', 'error'); return; }
+            let recognition = window.__recognition;
+            if (!recognition) {
+                recognition = new SR();
+                window.__recognition = recognition;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                recognition.onstart = function(){ window.__listening = true; showNotification('Listening...', 'info'); };
+                recognition.onend = function(){ window.__listening = false; showNotification('Stopped listening', 'info'); };
+            recognition.onresult = function(e) {
+                const text = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
+                if (handleVoiceCommand(text)) { return; }
+                const active = document.activeElement;
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                    const prev = active.value || '';
+                    active.value = prev ? (prev + ' ' + text) : text;
+                    try { active.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}
+                }
+                showNotification('Voice captured', 'success');
+            };
+                recognition.onerror = function(err) {
+                    window.__listening = false;
+                    const code = err && err.error ? String(err.error) : '';
+                    if (code === 'aborted') { showNotification('Listening canceled', 'info'); return; }
+                    if (code === 'not-allowed') { showNotification('Mic permission denied. Allow microphone in browser.', 'error'); return; }
+                    if (code === 'audio-capture') { showNotification('No microphone detected', 'error'); return; }
+                    if (code === 'no-speech') { showNotification('No speech detected', 'warning'); return; }
+                    showNotification('Voice error: ' + (code || 'Unknown'), 'error');
+                };
+                recognition.onspeechend = function(){ try { recognition.stop(); } catch(e) {} };
+            }
+            const lang = localStorage.getItem('voiceLang') || window.voiceLang || 'en-US';
+            recognition.lang = lang;
+            if (window.__listening) { try { recognition.stop(); } catch(e) {} return; }
+            try { recognition.start(); } catch(e) { showNotification('Failed to start listening', 'error'); }
+        }
+        window.startVoiceInput = startVoiceInput;
+        function __normalizeCommand(t){ return (t || '').toLowerCase().trim(); }
+        function showTab(btn){ try { if (btn) { if (window.bootstrap) { const Tab = window.bootstrap.Tab; if (Tab) { const inst = new Tab(btn); inst.show(); return true; } } btn.click(); return true; } } catch(e){} return false; }
+        function waitForElement(selector, timeout=4000){
+            return new Promise((resolve, reject) => {
+                const start = Date.now();
+                const tick = () => {
+                    const el = document.querySelector(selector);
+                    if (el) { resolve(el); return; }
+                    if (Date.now() - start > timeout) { reject(new Error('timeout')); return; }
+                    setTimeout(tick, 50);
+                };
+                tick();
+            });
+        }
+        function waitForOptions(selectEl, minOptions=2, timeout=4000){
+            return new Promise((resolve, reject) => {
+                const start = Date.now();
+                const tick = () => {
+                    if (selectEl && selectEl.options && selectEl.options.length >= minOptions) { resolve(true); return; }
+                    if (Date.now() - start > timeout) { reject(new Error('timeout')); return; }
+                    setTimeout(tick, 100);
+                };
+                tick();
+            });
+        }
+        function getBranchVariants(rawName){
+            const name = String(rawName || '').trim();
+            const base = __norm(name);
+            const acr = __acronym(name);
+            const variants = [name, base, base.replace(/\s+/g,''), acr, name.toLowerCase()];
+            const dotExpanded = base.replace(/\b([a-z])\s*([a-z])\b/g, '$1 $2');
+            variants.push(dotExpanded);
+            const map = {
+                'gt': ['g t','g.t','(g.t)','d watson g t','watson g t'],
+                'gk': ['g k','g.k','(g.k)','d watson g k','watson g k'],
+                'ch': ['ch ck','ch.ck','(ch.ck)','d watson ch ck','watson ch ck'],
+                'f6': ['f 6','f-6','(f-6)','d watson f 6','watson f 6'],
+                'g15': ['g 15','g-15','(g-15)','d watson g 15','watson g 15']
+            };
+            Object.keys(map).forEach(k=>{ if (base === k || base.includes(k)) variants.push(...map[k]); });
+            return Array.from(new Set(variants)).filter(Boolean);
+        }
+        function scheduleBranchSelect(rawName, selects){
+            const variants = getBranchVariants(rawName);
+            const delays = [0, 120, 300, 800, 1500];
+            for (const d of delays){
+                setTimeout(() => {
+                    for (const sel of selects){
+                        if (!sel) continue;
+                        for (const v of variants){ if (v && selectOptionByText(sel, v)) return; }
+                    }
+                }, d);
+            }
+            return true;
+        }
+        function activateDashboardTab(prefix){
+            const isShop = String(prefix).toLowerCase().includes('shop');
+            const navId = isShop ? 'shop-dashboard-tab' : 'warehouse-dashboard-tab';
+            const paneId = isShop ? 'shop-dashboard-content' : 'warehouse-dashboard-content';
+            const otherNavId = isShop ? 'warehouse-dashboard-tab' : 'shop-dashboard-tab';
+            const otherPaneId = isShop ? 'warehouse-dashboard-content' : 'shop-dashboard-content';
+            const nav = document.getElementById(navId);
+            const pane = document.getElementById(paneId);
+            const otherNav = document.getElementById(otherNavId);
+            const otherPane = document.getElementById(otherPaneId);
+            if (otherNav) { otherNav.classList.remove('active'); otherNav.setAttribute('aria-selected','false'); }
+            if (nav) { nav.classList.add('active'); nav.setAttribute('aria-selected','true'); }
+            if (otherPane) { otherPane.classList.remove('show'); otherPane.classList.remove('active'); }
+            if (pane) { pane.classList.add('show'); pane.classList.add('active'); pane.style.display = ''; pane.style.visibility = 'visible'; }
+        }
+        async function ensureDashboardTabActive(prefix){
+            const isShop = String(prefix).toLowerCase().includes('shop');
+            await waitForElement(isShop ? '#shop-dashboard-tab' : '#warehouse-dashboard-tab', 8000).catch(()=>{});
+            await waitForElement(isShop ? '#shop-dashboard-content' : '#warehouse-dashboard-content', 8000).catch(()=>{});
+            const btn = document.getElementById(isShop ? 'shop-dashboard-tab' : 'warehouse-dashboard-tab');
+            if (btn) { try { showTab(btn); } catch(e){} }
+            activateDashboardTab(prefix);
+        }
+        function scheduleDashboardActivation(prefix){
+            [0,120,300,800,1500].forEach(ms => { setTimeout(() => { ensureDashboardTabActive(prefix); }, ms); });
+        }
+        function getActiveSalesContext(){
+            const isSales = document.getElementById('sales-section') && document.getElementById('sales-section').classList.contains('active');
+            const categoryPane = document.getElementById('category-sales-content');
+            const departmentPane = document.getElementById('department-sales-content');
+            const categoryActive = !!(categoryPane && (categoryPane.classList.contains('show') || categoryPane.classList.contains('active')));
+            const departmentActive = !!(departmentPane && (departmentPane.classList.contains('show') || departmentPane.classList.contains('active')));
+            return { isSales, categoryActive, departmentActive };
+        }
+        function getActiveVoucherContext(){
+            const voucherSection = document.getElementById('payment-vouchers-section');
+            const listSection = document.getElementById('payment-voucher-list-section');
+            const supplierPane = document.getElementById('supplier-voucher-content');
+            const categoryPane = document.getElementById('category-voucher-content');
+            const isVoucherSection = !!(voucherSection && voucherSection.classList.contains('active'));
+            const isListSection = !!(listSection && listSection.classList.contains('active'));
+            const supplierActive = !!(supplierPane && (supplierPane.classList.contains('show') || supplierPane.classList.contains('active')));
+            const categoryActive = !!(categoryPane && (categoryPane.classList.contains('show') || categoryPane.classList.contains('active')));
+            return { isVoucherSection, isListSection, supplierActive, categoryActive };
+        }
+        function getActiveEmployeesContext(){
+            const section = document.getElementById('employees-section');
+            const listSection = document.getElementById('employee-list-section');
+            const isActive = !!(section && section.classList.contains('active'));
+            const isList = !!(listSection && listSection.classList.contains('active'));
+            return { isActive, isList };
+        }
+        function __norm(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' '); }
+        function __acronym(s){ const parts = __norm(s).split(' '); let a=''; for (let i=0;i<parts.length;i++){ if (parts[i]) a+=parts[i][0]; } return a; }
+        function __lev(a,b){ a=__norm(a); b=__norm(b); const m=a.length, n=b.length; if (!m) return n; if (!n) return m; const dp=new Array(n+1); for(let j=0;j<=n;j++) dp[j]=j; for(let i=1;i<=m;i++){ let prev=dp[0]; dp[0]=i; for(let j=1;j<=n;j++){ const tmp=dp[j]; dp[j]=Math.min(dp[j]+1, dp[j-1]+1, prev + (a[i-1]===b[j-1]?0:1)); prev=tmp; } } return dp[n]; }
+        function selectOptionByText(selectEl, text){
+            if (!selectEl || !text) return false;
+            const inputRaw = String(text).trim();
+            const input = __norm(inputRaw);
+            const inputAcr = __acronym(inputRaw);
+            let bestIdx = -1; let bestScore = -1;
+            for (let i=0;i<selectEl.options.length;i++){
+                const opt = selectEl.options[i];
+                const optTextRaw = opt.text || '';
+                const optText = __norm(optTextRaw);
+                const optAcr = __acronym(optTextRaw);
+                let score = 0;
+                if (optText === input) score = 100;
+                else if (optText.includes(input)) score = 90;
+                else if (input.includes(optText) && optText.length>0) score = 80;
+                else if (optAcr && inputAcr && optAcr === inputAcr) score = 75;
+                else if (optAcr && input && optAcr.includes(input)) score = 70;
+                else if (optText && input && optText.startsWith(input)) score = 65;
+                else {
+                    const dist = __lev(optText, input);
+                    const maxLen = Math.max(optText.length, input.length);
+                    const sim = 1 - (dist / Math.max(1, maxLen));
+                    if (sim > 0.6) score = Math.floor(sim * 60);
+                }
+                if (score > bestScore) { bestScore = score; bestIdx = i; }
+            }
+            if (bestIdx >= 0 && bestScore >= 50){ selectEl.value = selectEl.options[bestIdx].value; try { selectEl.dispatchEvent(new Event('change', { bubbles:true })); } catch(e) {} return true; }
+            for (let i=0;i<selectEl.options.length;i++){ const optText = (selectEl.options[i].text || '').trim().toLowerCase(); if (optText.includes(input)) { selectEl.value = selectEl.options[i].value; try { selectEl.dispatchEvent(new Event('change', { bubbles:true })); } catch(e) {} return true; } }
+            return false;
+        }
+        function setInputValueById(id, value){ const el = document.getElementById(id); if (!el) return false; el.value = value; try { el.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {} return true; }
+        function setDateValue(target){
+            const today = new Date();
+            const pad = (n)=> String(n).padStart(2, '0');
+            if (target.includes('today')) return today.toISOString().split('T')[0];
+            if (target.includes('yesterday')){ const y = new Date(); y.setDate(today.getDate()-1); return y.toISOString().split('T')[0]; }
+            const m = target.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+            if (m){ return `${m[1]}-${pad(m[2])}-${pad(m[3])}`; }
+            return '';
+        }
+        function setCategorySaleByName(name, amount){
+            const cats = (window.appData && Array.isArray(appData.categories)) ? appData.categories : [];
+            const match = cats.find(c => (c.name || '').trim().toLowerCase() === String(name).trim().toLowerCase());
+            if (!match) return false;
+            const input = document.querySelector(`.category-sales[data-category="${match._id || match.id}"]`);
+            if (!input) return false;
+            input.value = amount;
+            try { input.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {}
+            return true;
+        }
+        function setCategoryCostByName(name, amount){
+            const cats = (window.appData && Array.isArray(appData.categories)) ? appData.categories : [];
+            const match = cats.find(c => (c.name || '').trim().toLowerCase() === String(name).trim().toLowerCase());
+            if (!match) return false;
+            const input = document.querySelector(`.category-cost[data-category="${match._id || match.id}"]`);
+            if (!input) return false;
+            input.value = amount;
+            try { input.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {}
+            return true;
+        }
+        function findCategoryByText(text){
+            const cats = (window.appData && Array.isArray(appData.categories)) ? appData.categories : [];
+            const t = __norm(text);
+            const aliasTargets = { 'neutra':'nutra', 'nutra':'nutra' };
+            if (aliasTargets[t]){
+                const target = __norm(aliasTargets[t]);
+                const byAlias = cats.find(c => __norm(c.name || '').includes(target));
+                if (byAlias) return byAlias;
+            }
+            let best = null; let bestScore = -1;
+            for (let i=0;i<cats.length;i++){
+                const nameRaw = cats[i].name || '';
+                const n = __norm(nameRaw);
+                let score = 0;
+                if (n === t) score = 100;
+                else if (n.includes(t)) score = 95;
+                else if (t.includes(n) && n.length>0) score = 90;
+                else {
+                    const dist = __lev(n, t);
+                    const maxLen = Math.max(n.length, t.length);
+                    const sim = 1 - (dist / Math.max(1, maxLen));
+                    score = Math.floor(sim * 90);
+                }
+                if (score > bestScore) { bestScore = score; best = cats[i]; }
+            }
+            if (best && bestScore >= 60) return best;
+            return null;
+        }
+        function setCategoryFieldByText(namePhrase, amount, field){
+            const cat = findCategoryByText(namePhrase);
+            if (!cat) return false;
+            const selector = field === 'cost' ? `.category-cost[data-category="${cat._id || cat.id}"]` : `.category-sales[data-category="${cat._id || cat.id}"]`;
+            const input = document.querySelector(selector);
+            if (!input) return false;
+            input.value = amount;
+            try { input.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {}
+            try { input.dispatchEvent(new Event('change', { bubbles:true })); } catch(e) {}
+            return true;
+        }
+        function setCategoryContext(namePhrase, field){
+            const cat = findCategoryByText(namePhrase);
+            if (!cat) return false;
+            window.__voiceCategoryCtx = { id: cat._id || cat.id, name: cat.name, field: field === 'cost' ? 'cost' : 'sale' };
+            const tabBtn = document.getElementById('category-tab'); if (tabBtn) { try { tabBtn.click(); } catch(e){} }
+            return true;
+        }
+        function applyCategoryContextAmount(amount){
+            const ctx = window.__voiceCategoryCtx; if (!ctx) return false;
+            const selector = ctx.field === 'cost' ? `.category-cost[data-category="${ctx.id}"]` : `.category-sales[data-category="${ctx.id}"]`;
+            const input = document.querySelector(selector);
+            if (!input) return false;
+            input.value = amount;
+            try { input.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {}
+            try { input.dispatchEvent(new Event('change', { bubbles:true })); } catch(e) {}
+            return true;
+        }
+        function setBulkSubDeptValueByName(name, field, amount){
+            const rows = document.querySelectorAll('#bulkSubDeptTableBodyTab2 tr');
+            const key = String(name).trim().toLowerCase();
+            let targetRow = null;
+            rows.forEach(r => { const s = r.querySelector('td strong'); const txt = s ? (s.textContent || '').trim().toLowerCase() : ''; if (!targetRow && (txt === key || txt.includes(key))) targetRow = r; });
+            if (!targetRow) return false;
+            const f = String(field).toLowerCase();
+            let selectors = [];
+            let index = -1;
+            if (f.includes('gross')) { selectors = ['.bulk-gross-sale-tab2']; index = 0; }
+            else if (f.includes('discount') && f.includes('percent')) { selectors = ['.bulk-discount-percent-tab2']; index = 2; }
+            else if (f.includes('discount')) { selectors = ['.bulk-discount-tab2']; index = 1; }
+            else if (f.includes('sale value') || (f.includes('sale') && !f.includes('gross'))) { selectors = ['.bulk-sale-value-tab2']; index = 3; }
+            else if (f.includes('return')) { selectors = ['.bulk-return-tab2']; index = 4; }
+            else if (f.includes('gst')) { selectors = ['.bulk-gst-tab2']; index = 5; }
+            let input = null;
+            for (const sel of selectors){ const cand = targetRow.querySelector(sel); if (cand) { input = cand; break; } }
+            if (!input){ const inputs = targetRow.querySelectorAll('input'); if (index >=0 && inputs[index]) input = inputs[index]; }
+            if (!input) return false;
+            input.value = amount;
+            try { input.dispatchEvent(new Event('input', { bubbles:true })); } catch(e) {}
+            try { input.dispatchEvent(new Event('change', { bubbles:true })); } catch(e) {}
+            return true;
+        }
+        function handleVoiceCommand(rawText){
+            const t = __normalizeCommand(rawText);
+            if (!t) return false;
+            const click = (sel) => { const el = document.querySelector(sel); if (el) { try { el.click(); return true; } catch(e){} } return false; };
+            const openSection = (id) => { if (typeof showSection === 'function') { showSection(id); return true; } return false; };
+            // Navigation
+            if (/open .*dashboard|dashboard kholo|dashboard/gi.test(t)) { const ok = openSection('dashboard'); if (ok) { showNotification('Opening dashboard', 'info'); } return ok; }
+            if (/open .*shop .*dashboard|shop .*dashboard/gi.test(t)) {
+                if (openSection('dashboard')) {
+                    showNotification('Opening shop dashboard', 'info');
+                    scheduleDashboardActivation('shop');
+                    setTimeout(() => { if (typeof window.loadDashboard === 'function') { try { window.loadDashboard(null, 'shop'); } catch(e){} } }, 200);
+                    return true;
+                }
+            }
+            if (/open .*warehouse .*dashboard|warehouse .*dashboard/gi.test(t)) {
+                if (openSection('dashboard')) {
+                    showNotification('Opening warehouse dashboard', 'info');
+                    scheduleDashboardActivation('warehouse');
+                    setTimeout(() => { if (typeof window.loadDashboard === 'function') { try { window.loadDashboard(null, 'warehouse'); } catch(e){} } }, 200);
+                    return true;
+                }
+            }
+            if (/open .*sales|sale entry|sales entry|warehouse|category sale/gi.test(t)) { if (openSection('sales')) { setTimeout(() => { click('#category-tab'); }, 100); return true; } }
+            if (/open .*shop|department sale|shop sale/gi.test(t)) { if (openSection('sales')) { setTimeout(() => { click('#department-tab'); }, 100); return true; } }
+            if (/open .*categories/gi.test(t)) return openSection('categories');
+            if (/open .*departments/gi.test(t)) return openSection('departments');
+            if (/open .*suppliers/gi.test(t)) return openSection('suppliers');
+            if (/open .*payment.*voucher.*list/gi.test(t)) return openSection('payment-voucher-list');
+            if (/open .*payment.*voucher/gi.test(t)) return openSection('payment-vouchers');
+            if (/open .*payment( dashboard)?/gi.test(t)) return openSection('payment-dashboard');
+            if (/open .*reports/gi.test(t)) return openSection('reports');
+            if (/open .*settings/gi.test(t)) return openSection('settings');
+            if (/open .*employees|open .*employee registration|employees( section)?/gi.test(t)) return openSection('employees');
+            if (/open .*employee list|show .*employee list/gi.test(t)) return openSection('employee-list');
+            if (/show .*sales list/gi.test(t)) { if (openSection('sales')) { setTimeout(() => { click('#viewSalesListBtn'); }, 150); return true; } }
+            if (/show .*department sales list/gi.test(t)) { if (openSection('sales')) { setTimeout(() => { click('#viewDeptSalesListBtn'); }, 150); return true; } }
+            if (/close|band|hide|back/gi.test(t)) { if (click('#hideSalesListBtn')||click('#backToSalesBtn')||click('#hideDeptSalesListBtn')||click('#backToDeptSalesBtn')) return true; }
+            // Payment vouchers navigation
+            if (/open .*supplier voucher/gi.test(t)) { if (openSection('payment-vouchers')) { setTimeout(() => { click('#supplier-voucher-tab'); }, 150); return true; } }
+            if (/open .*category voucher/gi.test(t)) { if (openSection('payment-vouchers')) { setTimeout(() => { click('#category-voucher-tab'); }, 150); return true; } }
+            if (/open .*voucher list/gi.test(t)) { if (openSection('payment-voucher-list')) { return true; } }
+            // Context helpers
+            const ctx = getActiveSalesContext();
+            const vctx = getActiveVoucherContext();
+            const ectx = getActiveEmployeesContext();
+            // Branch selection
+            let m = t.match(/select .*branch (.+)/i);
+            if (m && m[1]){
+                const name = m[1].trim();
+                const targets = [];
+                if (ctx.categoryActive) targets.push(document.getElementById('saleBranch'));
+                if (ctx.departmentActive) { targets.push(document.getElementById('bulkDeptSaleBranchTab2')); targets.push(document.getElementById('deptSaleBranch')); }
+                scheduleBranchSelect(name, targets); showNotification('Branch selecting: '+name, 'info'); return true;
+            }
+            m = t.match(/^(?:select )?(?:branch )?(pwd|gk|g\.k|gt|g\.t|f6|f-6|g15|g-15|g\s*15)$/i);
+            if (m && m[1]){
+                const name = m[1].trim();
+                const targets = [];
+                if (ctx.categoryActive) targets.push(document.getElementById('saleBranch'));
+                if (ctx.departmentActive) { targets.push(document.getElementById('bulkDeptSaleBranchTab2')); targets.push(document.getElementById('deptSaleBranch')); }
+                scheduleBranchSelect(name, targets); showNotification('Branch selecting: '+name, 'info'); return true;
+            }
+            // Department selection
+            m = t.match(/select .*department (.+)/i);
+            if (m && m[1]){
+                const name = m[1].trim();
+                const targets = [document.getElementById('bulkDeptSaleDepartmentTab2'), document.getElementById('deptSaleDepartment')];
+                for (const sel of targets){ if (sel && selectOptionByText(sel, name)) { showNotification('Department selected: '+name, 'success'); return true; } }
+            }
+            // Sub-Department selection (single entry)
+            m = t.match(/select .*sub( |-)?department (.+)/i);
+            if (m && m[2]){
+                const name = m[2].trim();
+                const sel = document.getElementById('deptSaleSubDepartment');
+                if (sel && selectOptionByText(sel, name)) { showNotification('Sub-department selected: '+name, 'success'); return true; }
+            }
+            // Date setting
+            if (/set .*date (.+)/i.test(t)){
+                const datePhrase = t.replace(/^.*set .*date /i,'');
+                const dateVal = setDateValue(datePhrase);
+                if (dateVal){
+                    const ids = [];
+                    if (ctx.categoryActive) ids.push('saleDate');
+                    if (ctx.departmentActive) { ids.push('bulkDeptSaleDateTab2'); ids.push('deptSaleDate'); }
+                    for (const id of ids){ if (setInputValueById(id, dateVal)) { showNotification('Date set to '+dateVal, 'success'); return true; } }
+                }
+            }
+            // Shop single entry numeric fields
+            m = t.match(/(enter|set) .*gross sale ([0-9]+(?:\.[0-9]+)?)/i); if (m && setInputValueById('deptSaleGrossSale', m[2])) { showNotification('Gross Sale set', 'success'); return true; }
+            m = t.match(/(enter|set) .*discount (percent|percentage) ([0-9]+(?:\.[0-9]+)?)/i); if (m && setInputValueById('deptSaleDiscountPercent', m[3])) { showNotification('Discount % set', 'success'); return true; }
+            m = t.match(/(enter|set) .*return ([0-9]+(?:\.[0-9]+)?)/i); if (m && setInputValueById('deptSaleReturnAmount', m[2])) { showNotification('Return set', 'success'); return true; }
+            m = t.match(/(enter|set) .*gst ([0-9]+(?:\.[0-9]+)?)/i); if (m && setInputValueById('deptSaleGST', m[2])) { showNotification('GST set', 'success'); return true; }
+            m = t.match(/(enter|set) .*notes (.+)/i); if (m && setInputValueById('saleNotes', m[2])) { showNotification('Notes set', 'success'); return true; }
+            // Warehouse category sales by name
+            m = t.match(/(enter|set) .*category (.+) sale ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[2] && m[3]){ if (setCategorySaleByName(m[2], m[3])) { showNotification('Category sale set: '+m[2], 'success'); return true; } }
+            m = t.match(/(enter|set) .*category (.+) cost ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[2] && m[3]){ if (setCategoryCostByName(m[2], m[3])) { showNotification('Category cost set: '+m[2], 'success'); return true; } }
+            m = t.match(/(enter|set) .*sub( |-)?department (.+) (gross sale|gross|discount amount|discount percent|discount|sale value|sale|return|gst) ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[3] && m[4] && m[5]){ if (setBulkSubDeptValueByName(m[3], m[4], m[5])) { showNotification('Value set for '+m[3], 'success'); return true; } }
+            if (ctx.departmentActive){
+                m = t.match(/(enter|set) ([a-z0-9 \-&]+?) (gross sale|gross|discount amount|discount percent|discount|sale value|sale|return|gst) ([0-9]+(?:\.[0-9]+)?)/i);
+                if (m && m[2] && m[3] && m[4]){ if (setBulkSubDeptValueByName(m[2], m[3], m[4])) { showNotification('Value set for '+m[2], 'success'); return true; } }
+            }
+            m = t.match(/(category )?([a-z0-9 \-&]+?) (sale|amount) ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[2] && m[4]){ if (ctx.categoryActive || openSection('sales')) { if (!ctx.categoryActive) { setTimeout(() => { const btn = document.getElementById('category-tab'); if (btn) btn.click(); }, 100); } setTimeout(() => { if (setCategoryFieldByText(m[2], m[4], 'sale')) { showNotification('Category sale set: '+m[2], 'success'); } }, 180); return true; } }
+            m = t.match(/(enter|set) ([a-z0-9 \-&]+?) ([0-9]+(?:\.[0-9]+)?) sale/i);
+            if (m && m[2] && m[3]){ if (ctx.categoryActive || openSection('sales')) { if (!ctx.categoryActive) { setTimeout(() => { const btn = document.getElementById('category-tab'); if (btn) btn.click(); }, 100); } setTimeout(() => { if (setCategoryFieldByText(m[2], m[3], 'sale')) { showNotification('Category sale set: '+m[2], 'success'); } }, 180); return true; } }
+            m = t.match(/(enter|set) ([a-z0-9 \-&]+?) ([0-9]+(?:\.[0-9]+)?) cost/i);
+            if (m && m[2] && m[3]){ if (ctx.categoryActive || openSection('sales')) { if (!ctx.categoryActive) { setTimeout(() => { const btn = document.getElementById('category-tab'); if (btn) btn.click(); }, 100); } setTimeout(() => { if (setCategoryFieldByText(m[2], m[3], 'cost')) { showNotification('Category cost set: '+m[2], 'success'); } }, 180); return true; } }
+            m = t.match(/(enter|set) (?:sale )?amount (?:in )?([a-z0-9 \-&]+?) ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[2] && m[3]){ if (ctx.categoryActive || openSection('sales')) { if (!ctx.categoryActive) { setTimeout(() => { const btn = document.getElementById('category-tab'); if (btn) btn.click(); }, 100); } setTimeout(() => { if (setCategoryFieldByText(m[2], m[3], 'sale')) { showNotification('Category sale set: '+m[2], 'success'); } }, 180); return true; } }
+            m = t.match(/(enter|set) (?:cost )?amount (?:in )?([a-z0-9 \-&]+?) ([0-9]+(?:\.[0-9]+)?)/i);
+            if (m && m[2] && m[3]){ if (ctx.categoryActive || openSection('sales')) { if (!ctx.categoryActive) { setTimeout(() => { const btn = document.getElementById('category-tab'); if (btn) btn.click(); }, 100); } setTimeout(() => { if (setCategoryFieldByText(m[2], m[3], 'cost')) { showNotification('Category cost set: '+m[2], 'success'); } }, 180); return true; } }
+            m = t.match(/(enter|set) ([a-z0-9 \-&]+?) (sale|cost)$/i);
+            if (m && m[2] && m[3]){ if (setCategoryContext(m[2], m[3])) { showNotification(`Say amount for ${m[2]} ${m[3]}`, 'info'); return true; } }
+            m = t.match(/(enter|set)?\s*(amount|value)\s*([0-9]+(?:\.[0-9]+)?)$/i);
+            if (m && m[3]){ if (applyCategoryContextAmount(m[3])) { showNotification('Amount applied', 'success'); return true; } }
+            // Save actions
+            if (/save .*sale/i.test(t)){
+                if (ctx.categoryActive && typeof window.saveSalesEntry === 'function'){ window.saveSalesEntry(); showNotification('Saving warehouse sale...', 'info'); return true; }
+                if (ctx.departmentActive && typeof window.saveDepartmentSalesEntry === 'function'){ window.saveDepartmentSalesEntry(); showNotification('Saving department sale...', 'info'); return true; }
+            }
+            if (/save .*bulk .*department .*sales/i.test(t)){
+                if (typeof window.saveBulkDepartmentSalesEntryTab2 === 'function'){ window.saveBulkDepartmentSalesEntryTab2(); showNotification('Saving bulk department sales...', 'info'); return true; }
+            }
+            // Supplier voucher form
+            if (vctx.supplierActive) {
+                let mm = t.match(/select .*supplier (.+)/i); if (mm && selectOptionByText(document.getElementById('paymentVoucherSupplier'), mm[1])) { showNotification('Supplier selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*branch (.+)/i); if (mm && selectOptionByText(document.getElementById('paymentVoucherBranch'), mm[1])) { showNotification('Branch selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*method (.+)/i); if (mm && selectOptionByText(document.getElementById('paymentVoucherMethod'), mm[1])) { showNotification('Method selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/set .*amount ([0-9]+(?:\.[0-9]+)?)/i); if (mm && setInputValueById('paymentVoucherAmount', mm[1])) { showNotification('Amount set', 'success'); return true; }
+                mm = t.match(/set .*description (.+)/i); if (mm && setInputValueById('paymentVoucherDescription', mm[1])) { showNotification('Description set', 'success'); return true; }
+                if (/set .*date (.+)/i.test(t)) { const datePhrase = t.replace(/^.*set .*date /i,''); const dv = setDateValue(datePhrase); if (dv && setInputValueById('paymentVoucherDate', dv)) { showNotification('Voucher date set '+dv, 'success'); return true; } }
+                if (/save .*voucher/i.test(t)) { const form = document.getElementById('paymentVoucherForm'); const vid = form ? form.getAttribute('data-voucher-id') : null; if (vid && typeof window.updatePaymentVoucher === 'function') { window.updatePaymentVoucher(vid); showNotification('Updating voucher...', 'info'); return true; } if (typeof window.saveNewPaymentVoucher === 'function') { window.saveNewPaymentVoucher(); showNotification('Saving voucher...', 'info'); return true; } }
+            }
+            // Category voucher form
+            if (vctx.categoryActive) {
+                let mm = t.match(/select .*category (.+)/i); if (mm && selectOptionByText(document.getElementById('categoryVoucherCategory'), mm[1])) { showNotification('Category selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*branch (.+)/i); if (mm && selectOptionByText(document.getElementById('categoryVoucherBranch'), mm[1])) { showNotification('Branch selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*method (.+)/i); if (mm && selectOptionByText(document.getElementById('categoryVoucherMethod'), mm[1])) { showNotification('Method selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/set .*amount ([0-9]+(?:\.[0-9]+)?)/i); if (mm && setInputValueById('categoryVoucherAmount', mm[1])) { showNotification('Amount set', 'success'); return true; }
+                mm = t.match(/set .*description (.+)/i); if (mm && setInputValueById('categoryVoucherDescription', mm[1])) { showNotification('Description set', 'success'); return true; }
+                if (/set .*date (.+)/i.test(t)) { const datePhrase = t.replace(/^.*set .*date /i,''); const dv = setDateValue(datePhrase); if (dv && setInputValueById('categoryVoucherDate', dv)) { showNotification('Voucher date set '+dv, 'success'); return true; } }
+                if (/save .*voucher/i.test(t)) { const form = document.getElementById('categoryVoucherForm'); const vid = form ? form.getAttribute('data-voucher-id') : null; if (vid && typeof window.updateCategoryVoucher === 'function') { window.updateCategoryVoucher(vid); showNotification('Updating category voucher...', 'info'); return true; } if (typeof window.saveNewCategoryVoucher === 'function') { window.saveNewCategoryVoucher(); showNotification('Saving category voucher...', 'info'); return true; } }
+            }
+            // Voucher list filters
+            if (vctx.isListSection) {
+                let mm = t.match(/select .*branch (.+)/i); if (mm && selectOptionByText(document.getElementById('paymentVoucherListBranchFilter'), mm[1])) { showNotification('List branch filter: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*supplier (.+)/i); if (mm && selectOptionByText(document.getElementById('paymentVoucherListSupplierFilter'), mm[1])) { showNotification('List supplier filter: '+mm[1], 'success'); return true; }
+                if (/set .*from date (.+)/i.test(t)) { const dp = t.replace(/^.*set .*from date /i,''); const dv = setDateValue(dp); if (dv && setInputValueById('paymentVoucherListFromDate', dv)) { showNotification('From date set '+dv, 'success'); return true; } }
+                if (/set .*to date (.+)/i.test(t)) { const dp = t.replace(/^.*set .*to date /i,''); const dv = setDateValue(dp); if (dv && setInputValueById('paymentVoucherListToDate', dv)) { showNotification('To date set '+dv, 'success'); return true; } }
+                if (/load .*voucher list|refresh .*voucher list|show .*vouchers/gi.test(t)) { if (typeof window.loadPaymentVoucherList === 'function') { window.loadPaymentVoucherList(); showNotification('Loading vouchers...', 'info'); return true; } }
+            }
+            if (ectx.isActive) {
+                let mm = t.match(/select .*branch (.+)/i); if (mm && selectOptionByText(document.getElementById('employeeBranch'), mm[1])) { showNotification('Employee branch selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*department (.+)/i); if (mm && selectOptionByText(document.getElementById('employeeDepartment'), mm[1])) { showNotification('Employee department selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/select .*designation (.+)/i); if (mm && selectOptionByText(document.getElementById('employeeDesignation'), mm[1])) { showNotification('Employee designation selected: '+mm[1], 'success'); return true; }
+                mm = t.match(/(enter|set) .*code (.+)/i); if (mm && setInputValueById('employeeCode', mm[2])) { showNotification('Employee code set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*name (.+)/i); if (mm && setInputValueById('employeeName', mm[2])) { showNotification('Employee name set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*father.*mother (.+)/i); if (mm && setInputValueById('employeeFatherMother', mm[2])) { showNotification('Father/Mother set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*cnic (.+)/i); if (mm && setInputValueById('employeeCNIC', mm[2])) { showNotification('CNIC set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*opening ([0-9]+(?:\.[0-9]+)?)/i); if (mm && setInputValueById('employeeOpening', mm[2])) { showNotification('Opening set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*salary ([0-9]+(?:\.[0-9]+)?)/i); if (mm && setInputValueById('employeeSalary', mm[2])) { showNotification('Salary set', 'success'); return true; }
+                mm = t.match(/select .*salary period (.+)/i); if (mm && selectOptionByText(document.getElementById('employeeSalaryPeriod'), mm[1])) { showNotification('Salary period selected', 'success'); return true; }
+                mm = t.match(/(enter|set) .*alf (.+)/i); if (mm && setInputValueById('employeeALF', mm[2])) { showNotification('ALF set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*bop (.+)/i); if (mm && setInputValueById('employeeBOP', mm[2])) { showNotification('BOP set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*bip (.+)/i); if (mm && setInputValueById('employeeBIP', mm[2])) { showNotification('BIP set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*bahl (.+)/i); if (mm && setInputValueById('employeeBAHL', mm[2])) { showNotification('BAHL set', 'success'); return true; }
+                if (/save .*employee/i.test(t)) { if (typeof window.saveEmployee === 'function') { window.saveEmployee(); showNotification('Saving employee...', 'info'); return true; } }
+                if (/clear .*employee .*form|reset .*employee .*form/i.test(t)) { if (typeof window.clearEmployeeForm === 'function') { window.clearEmployeeForm(); showNotification('Employee form cleared', 'info'); return true; } }
+                if (/create .*department|add .*department|open .*department .*modal/i.test(t)) { if (typeof window.showEmployeeDepartmentModal === 'function') { window.showEmployeeDepartmentModal(); showNotification('Opening department modal', 'info'); return true; } }
+                if (/create .*designation|add .*designation|open .*designation .*modal/i.test(t)) { if (typeof window.showEmployeeDesignationModal === 'function') { window.showEmployeeDesignationModal(); showNotification('Opening designation modal', 'info'); return true; } }
+            }
+            if (document.getElementById('employeeDepartmentModal') && document.getElementById('employeeDepartmentModal').classList.contains('show')) {
+                let mm = t.match(/(enter|set) .*department name (.+)/i); if (mm && setInputValueById('employeeDepartmentName', mm[2])) { showNotification('Department name set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*department description (.+)/i); if (mm && setInputValueById('employeeDepartmentDescription', mm[2])) { showNotification('Department description set', 'success'); return true; }
+                if (/set .*department active (true|false|yes|no)/i.test(t)) { const v = /true|yes/i.test(t); const cb = document.getElementById('employeeDepartmentActive'); if (cb) { cb.checked = v; try { cb.dispatchEvent(new Event('change', { bubbles:true })); } catch(e){} showNotification('Department active set', 'success'); return true; } }
+                if (/save .*department/i.test(t)) { if (typeof window.saveEmployeeDepartment === 'function') { window.saveEmployeeDepartment(); showNotification('Saving department...', 'info'); return true; } }
+            }
+            if (document.getElementById('employeeDesignationModal') && document.getElementById('employeeDesignationModal').classList.contains('show')) {
+                let mm = t.match(/(enter|set) .*designation name (.+)/i); if (mm && setInputValueById('employeeDesignationName', mm[2])) { showNotification('Designation name set', 'success'); return true; }
+                mm = t.match(/(enter|set) .*designation description (.+)/i); if (mm && setInputValueById('employeeDesignationDescription', mm[2])) { showNotification('Designation description set', 'success'); return true; }
+                if (/set .*designation active (true|false|yes|no)/i.test(t)) { const v = /true|yes/i.test(t); const cb = document.getElementById('employeeDesignationActive'); if (cb) { cb.checked = v; try { cb.dispatchEvent(new Event('change', { bubbles:true })); } catch(e){} showNotification('Designation active set', 'success'); return true; } }
+                if (/save .*designation/i.test(t)) { if (typeof window.saveEmployeeDesignation === 'function') { window.saveEmployeeDesignation(); showNotification('Saving designation...', 'info'); return true; } }
+            }
+            if (/logout|sign out|log out/gi.test(t)) { const btn = document.getElementById('logoutBtn'); if (btn) { try { btn.click(); showNotification('Logging out...', 'info'); } catch(e) {} return true; } }
+            if (/open .*payment reports/gi.test(t)) { if (openSection('reports')) { setTimeout(() => { if (typeof window.switchReportTab === 'function') window.switchReportTab('payment-reports', true); }, 150); return true; } }
+            if (/open .*sales report/gi.test(t)) { if (openSection('reports')) { setTimeout(() => { if (typeof window.switchReportTab === 'function') window.switchReportTab('sales-report', true); }, 150); return true; } }
+            if (/open .*sales comparison report/gi.test(t)) { if (openSection('reports')) { setTimeout(() => { if (typeof window.switchReportTab === 'function') window.switchReportTab('sales-comparison-report', true); }, 150); return true; } }
+            if (/open .*datewise sales report/gi.test(t)) { if (openSection('reports')) { setTimeout(() => { if (typeof window.switchReportTab === 'function') window.switchReportTab('datewise-sales-report', true); }, 150); return true; } }
+            return false;
+        }
         
         // Save settings
         function saveSettings() {
@@ -36338,6 +36831,7 @@ sortedBranches.forEach(data => {
             const itemsPerPageEl = document.getElementById('itemsPerPage');
             const itemsPerPageInputEl = document.getElementById('itemsPerPageInput');
             const appThemeSelectEl = document.getElementById('appThemeSelect');
+            const voiceLangEl = document.getElementById('voiceRecognitionLang');
             
             const settingsData = {
                 companyName: companyNameEl ? companyNameEl.value : '',
@@ -36351,6 +36845,10 @@ sortedBranches.forEach(data => {
                 // Apply theme immediately after saving
                 if (settingsData.theme) {
                     applyTheme(settingsData.theme);
+                }
+                if (voiceLangEl && voiceLangEl.value) {
+                    localStorage.setItem('voiceLang', voiceLangEl.value);
+                    window.voiceLang = voiceLangEl.value;
                 }
                 showNotification('Settings saved successfully!', 'success');
             }).catch(error => {
