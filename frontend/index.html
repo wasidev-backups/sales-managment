@@ -25103,6 +25103,95 @@ sortedBranches.forEach(data => {
                 // First, ensure dropdowns are populated
                 populateCategoryVoucherDropdowns();
                 
+                // Use showSection to properly show the section (this handles all visibility correctly)
+                if (typeof showSection === 'function') {
+                    showSection('payment-vouchers');
+                } else {
+                    // Fallback to showPaymentTab if showSection is not available
+                    showPaymentTab('payment-vouchers');
+                }
+                
+                // Wait for section to be visible, then ensure all form elements are visible
+                setTimeout(() => {
+                    const section = document.getElementById('payment-vouchers-section');
+                    if (section) {
+                        // Force section visibility using the same method as showSection
+                        section.classList.add('active');
+                        section.style.removeProperty('display');
+                        section.style.removeProperty('visibility');
+                        section.style.removeProperty('opacity');
+                        section.style.height = 'auto';
+                        section.style.minHeight = '1px';
+                        
+                        // Ensure main-content is visible
+                        const mainContent = document.querySelector('.main-content');
+                        if (mainContent) {
+                            mainContent.style.display = 'block';
+                            mainContent.style.visibility = 'visible';
+                        }
+                    }
+                    
+                    // HIDE supplier voucher tab and content (only show category voucher when editing)
+                    const supplierTab = document.getElementById('supplier-voucher-tab');
+                    const supplierTabContent = document.getElementById('supplier-voucher-content');
+                    if (supplierTab) {
+                        supplierTab.classList.remove('active');
+                    }
+                    if (supplierTabContent) {
+                        supplierTabContent.classList.remove('show', 'active');
+                        supplierTabContent.style.display = 'none';
+                        supplierTabContent.style.visibility = 'hidden';
+                    }
+                    
+                    // SHOW category voucher tab and content
+                    const categoryTab = document.getElementById('category-voucher-tab');
+                    const categoryTabContent = document.getElementById('category-voucher-content');
+                    
+                    // Activate category tab button
+                    if (categoryTab) {
+                        categoryTab.classList.add('active');
+                        // Use Bootstrap Tab API to properly switch tabs
+                        const bsTab = new bootstrap.Tab(categoryTab);
+                        bsTab.show();
+                    }
+                    
+                    // Show category tab content
+                    if (categoryTabContent) {
+                        categoryTabContent.classList.add('show', 'active');
+                        categoryTabContent.style.display = 'block';
+                        categoryTabContent.style.visibility = 'visible';
+                        categoryTabContent.style.opacity = '1';
+                    }
+                    
+                    // Ensure category voucher card and form are visible
+                    const categoryCard = categoryTabContent?.querySelector('.card');
+                    if (categoryCard) {
+                        categoryCard.style.display = 'block';
+                        categoryCard.style.visibility = 'visible';
+                        categoryCard.style.opacity = '1';
+                    }
+                    
+                    const categoryCardBody = categoryTabContent?.querySelector('.card-body');
+                    if (categoryCardBody) {
+                        categoryCardBody.style.display = 'block';
+                        categoryCardBody.style.visibility = 'visible';
+                        categoryCardBody.style.opacity = '1';
+                    }
+                    
+                    // Ensure form is visible
+                    const form = document.getElementById('categoryVoucherForm');
+                    if (form) {
+                        form.style.display = 'block';
+                        form.style.visibility = 'visible';
+                        form.style.opacity = '1';
+                    }
+                    
+                    // Initialize form to ensure visibility
+                    if (typeof initializeCategoryVoucherForm === 'function') {
+                        initializeCategoryVoucherForm();
+                    }
+                }, 200);
+                
                 // Wait a moment for dropdowns to be populated, then set values
                 setTimeout(() => {
                     // Edit category voucher
@@ -25138,17 +25227,7 @@ sortedBranches.forEach(data => {
                     if (form) form.setAttribute('data-voucher-id', id);
                     
                     showNotification('Category voucher loaded for editing', 'info');
-                }, 500);
-                
-                // Switch to payment vouchers section and activate category tab
-                showPaymentTab('payment-vouchers');
-                setTimeout(() => {
-                    const categoryTab = document.getElementById('category-voucher-tab');
-                    if (categoryTab) {
-                        const bsTab = new bootstrap.Tab(categoryTab);
-                        bsTab.show();
-                    }
-                }, 300);
+                }, 800);
             }).catch(error => {
                 console.error('Error fetching category voucher:', error);
                 showNotification('Failed to load voucher', 'error');
@@ -25193,6 +25272,95 @@ sortedBranches.forEach(data => {
                     // First, ensure dropdowns are populated
                     populatePaymentVoucherDropdowns();
                     
+                    // Use showSection to properly show the section (this handles all visibility correctly)
+                    if (typeof showSection === 'function') {
+                        showSection('payment-vouchers');
+                    } else {
+                        // Fallback to showPaymentTab if showSection is not available
+                        showPaymentTab('payment-vouchers');
+                    }
+                    
+                    // Wait for section to be visible, then ensure all form elements are visible
+                    setTimeout(() => {
+                        const section = document.getElementById('payment-vouchers-section');
+                        if (section) {
+                            // Force section visibility using the same method as showSection
+                            section.classList.add('active');
+                            section.style.removeProperty('display');
+                            section.style.removeProperty('visibility');
+                            section.style.removeProperty('opacity');
+                            section.style.height = 'auto';
+                            section.style.minHeight = '1px';
+                            
+                            // Ensure main-content is visible
+                            const mainContent = document.querySelector('.main-content');
+                            if (mainContent) {
+                                mainContent.style.display = 'block';
+                                mainContent.style.visibility = 'visible';
+                            }
+                        }
+                        
+                        // HIDE category voucher tab and content (only show supplier voucher when editing)
+                        const categoryTab = document.getElementById('category-voucher-tab');
+                        const categoryTabContent = document.getElementById('category-voucher-content');
+                        if (categoryTab) {
+                            categoryTab.classList.remove('active');
+                        }
+                        if (categoryTabContent) {
+                            categoryTabContent.classList.remove('show', 'active');
+                            categoryTabContent.style.display = 'none';
+                            categoryTabContent.style.visibility = 'hidden';
+                        }
+                        
+                        // SHOW supplier voucher tab and content
+                        const supplierTab = document.getElementById('supplier-voucher-tab');
+                        const supplierTabContent = document.getElementById('supplier-voucher-content');
+                        
+                        // Activate supplier tab button
+                        if (supplierTab) {
+                            supplierTab.classList.add('active');
+                            // Use Bootstrap Tab API to properly switch tabs
+                            const bsTab = new bootstrap.Tab(supplierTab);
+                            bsTab.show();
+                        }
+                        
+                        // Show supplier tab content
+                        if (supplierTabContent) {
+                            supplierTabContent.classList.add('show', 'active');
+                            supplierTabContent.style.display = 'block';
+                            supplierTabContent.style.visibility = 'visible';
+                            supplierTabContent.style.opacity = '1';
+                        }
+                        
+                        // Ensure supplier voucher card and form are visible
+                        const supplierCard = supplierTabContent?.querySelector('.card');
+                        if (supplierCard) {
+                            supplierCard.style.display = 'block';
+                            supplierCard.style.visibility = 'visible';
+                            supplierCard.style.opacity = '1';
+                        }
+                        
+                        const supplierCardBody = supplierTabContent?.querySelector('.card-body');
+                        if (supplierCardBody) {
+                            supplierCardBody.style.display = 'block';
+                            supplierCardBody.style.visibility = 'visible';
+                            supplierCardBody.style.opacity = '1';
+                        }
+                        
+                        // Ensure form is visible
+                        const form = document.getElementById('paymentVoucherForm');
+                        if (form) {
+                            form.style.display = 'block';
+                            form.style.visibility = 'visible';
+                            form.style.opacity = '1';
+                        }
+                        
+                        // Initialize form to ensure visibility
+                        if (typeof initializePaymentVoucherForm === 'function') {
+                            initializePaymentVoucherForm();
+                        }
+                    }, 200);
+                    
                     // Wait a moment for dropdowns to be populated, then set values
                     setTimeout(() => {
                         const numberField = document.getElementById('paymentVoucherNumber');
@@ -25227,17 +25395,7 @@ sortedBranches.forEach(data => {
                         if (form) form.setAttribute('data-voucher-id', id);
                         
                         showNotification('Voucher loaded for editing', 'info');
-                    }, 500);
-                    
-                    // Switch to voucher tab
-                    showPaymentTab('payment-vouchers');
-                    setTimeout(() => {
-                        const supplierTab = document.getElementById('supplier-voucher-tab');
-                        if (supplierTab) {
-                            const bsTab = new bootstrap.Tab(supplierTab);
-                            bsTab.show();
-                        }
-                    }, 300);
+                    }, 800);
                 }).catch(error => {
                     console.error('Error fetching voucher:', error);
                     showNotification('Failed to load voucher', 'error');
