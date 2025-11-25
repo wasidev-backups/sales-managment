@@ -10368,18 +10368,218 @@
             constructor() {
                 this.baseURL = '/api';
                 this.token = localStorage.getItem('authToken') || null;
+                
+                // ========================================
+                // CACHING SYSTEM
+                // ========================================
+                this.cache = new Map(); // In-memory cache storage
+                this.cacheTimestamps = new Map(); // Track when cache entries were created
+                
+                // Cache TTL (Time To Live) in milliseconds
+                this.cacheTTL = {
+                    // Static data - rarely changes (10 minutes)
+                    static: 10 * 60 * 1000, // branches, categories, suppliers, settings, groups, users
+                    // Dynamic data - changes frequently (2 minutes)
+                    dynamic: 2 * 60 * 1000, // sales, payments, department-sales
+                    // Dashboard data (2 minutes)
+                    dashboard: 2 * 60 * 1000,
+                    // Reports (5 minutes)
+                    reports: 5 * 60 * 1000
+                };
+                
+                // Cache key patterns for invalidation
+                this.cachePatterns = {
+                    '/sales': ['/sales', '/department-sales'],
+                    '/payments': ['/payments', '/category-payments'],
+                    '/branches': ['/branches'],
+                    '/categories': ['/categories'],
+                    '/suppliers': ['/suppliers'],
+                    '/departments': ['/departments', '/sub-departments'],
+                    '/users': ['/users'],
+                    '/groups': ['/groups']
+                };
+                
+                // Debug flag for cache logging (set to false to reduce console noise)
+                this.debugCache = false; // Set to true for debugging
+            }
+            
+            // ========================================
+            // CACHE MANAGEMENT METHODS
+            // ========================================
+            
+            /**
+             * Get cache key from endpoint
+             */
+            getCacheKey(endpoint, options = {}) {
+                // Remove cache-busting parameter if present
+                let cleanEndpoint = endpoint.split('?')[0];
+                const queryString = endpoint.includes('?') ? endpoint.split('?')[1] : '';
+                
+                // Remove _t parameter from query string if present
+                let cleanQuery = queryString;
+                if (cleanQuery) {
+                    const params = new URLSearchParams(cleanQuery);
+                    params.delete('_t');
+                    cleanQuery = params.toString();
+                }
+                
+                // Build cache key with method and query params
+                const method = (options.method || 'GET').toUpperCase();
+                const key = `${method}:${cleanEndpoint}${cleanQuery ? '?' + cleanQuery : ''}`;
+                return key;
+            }
+            
+            /**
+             * Get cache TTL for endpoint
+             */
+            getCacheTTL(endpoint) {
+                // Static data endpoints
+                if (endpoint.includes('/branches') || 
+                    endpoint.includes('/categories') || 
+                    endpoint.includes('/suppliers') || 
+                    endpoint.includes('/settings') ||
+                    endpoint.includes('/groups') ||
+                    endpoint.includes('/users') ||
+                    endpoint.includes('/employees') ||
+                    endpoint.includes('/employee-departments') ||
+                    endpoint.includes('/employee-designations')) {
+                    return this.cacheTTL.static;
+                }
+                
+                // Dynamic data endpoints
+                if (endpoint.includes('/sales') || 
+                    endpoint.includes('/payments') || 
+                    endpoint.includes('/department-sales') ||
+                    endpoint.includes('/category-payments')) {
+                    return this.cacheTTL.dynamic;
+                }
+                
+                // Default to dynamic TTL
+                return this.cacheTTL.dynamic;
+            }
+            
+            /**
+             * Check if cache entry is valid (not expired)
+             */
+            isCacheValid(key) {
+                if (!this.cache.has(key) || !this.cacheTimestamps.has(key)) {
+                    return false;
+                }
+                
+                const timestamp = this.cacheTimestamps.get(key);
+                const endpoint = key.split(':')[1].split('?')[0];
+                const ttl = this.getCacheTTL(endpoint);
+                const age = Date.now() - timestamp;
+                
+                return age < ttl;
+            }
+            
+            /**
+             * Get data from cache
+             */
+            getFromCache(key) {
+                if (this.isCacheValid(key)) {
+                    // Only log cache hits in development (reduce console noise)
+                    if (this.debugCache) {
+                        console.log(`✅ Cache HIT: ${key}`);
+                    }
+                    return this.cache.get(key);
+                }
+                
+                // Remove expired cache entry
+                if (this.cache.has(key)) {
+                    this.cache.delete(key);
+                    this.cacheTimestamps.delete(key);
+                }
+                
+                // Only log cache misses in development
+                if (this.debugCache) {
+                    console.log(`❌ Cache MISS: ${key}`);
+                }
+                return null;
+            }
+            
+            /**
+             * Store data in cache
+             */
+            setCache(key, data) {
+                this.cache.set(key, data);
+                this.cacheTimestamps.set(key, Date.now());
+                // Only log cache sets in development
+                if (this.debugCache) {
+                    console.log(`💾 Cache SET: ${key}`);
+                }
+            }
+            
+            /**
+             * Invalidate cache by pattern
+             */
+            invalidateCache(pattern) {
+                let invalidatedCount = 0;
+                
+                // Find all cache keys matching the pattern
+                for (const key of this.cache.keys()) {
+                    const endpoint = key.split(':')[1].split('?')[0];
+                    
+                    // Check if endpoint matches pattern or any related patterns
+                    if (endpoint.includes(pattern)) {
+                        this.cache.delete(key);
+                        this.cacheTimestamps.delete(key);
+                        invalidatedCount++;
+                    }
+                }
+                
+                // Also invalidate related patterns
+                if (this.cachePatterns[pattern]) {
+                    this.cachePatterns[pattern].forEach(relatedPattern => {
+                        for (const key of this.cache.keys()) {
+                            const endpoint = key.split(':')[1].split('?')[0];
+                            if (endpoint.includes(relatedPattern)) {
+                                this.cache.delete(key);
+                                this.cacheTimestamps.delete(key);
+                                invalidatedCount++;
+                            }
+                        }
+                    });
+                }
+                
+                if (invalidatedCount > 0 && this.debugCache) {
+                    console.log(`🔄 Cache INVALIDATED: ${pattern} (${invalidatedCount} entries)`);
+                }
+                
+                return invalidatedCount;
+            }
+            
+            /**
+             * Clear all cache
+             */
+            clearAllCache() {
+                const count = this.cache.size;
+                this.cache.clear();
+                this.cacheTimestamps.clear();
+                // Only log cache clearing in development
+                if (this.debugCache) {
+                    console.log(`🗑️ Cache CLEARED: All (${count} entries)`);
+                }
             }
             
             // Set authentication token
             setToken(token) {
+                const oldToken = this.token;
                 this.token = token;
                 localStorage.setItem('authToken', token);
+                // Clear cache only if token actually changed (different user)
+                if (token && token !== oldToken) {
+                    this.clearAllCache();
+                }
             }
             
             // Clear authentication token
             clearToken() {
                 this.token = null;
                 localStorage.removeItem('authToken');
+                // Clear cache on logout
+                this.clearAllCache();
             }
             
             // Retry mechanism for failed requests
@@ -10417,7 +10617,28 @@
                 // Clean endpoint - ensure it starts with /
                 let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
                 
-                // Add cache-busting parameter to prevent 304 responses
+                const method = (options.method || 'GET').toUpperCase();
+                const isGetRequest = method === 'GET';
+                
+                // ========================================
+                // CACHE CHECK (Only for GET requests)
+                // ========================================
+                if (isGetRequest) {
+                    // Build cache key (without timestamp)
+                    const cacheKey = this.getCacheKey(cleanEndpoint, options);
+                    
+                    // Check cache first
+                    const cachedData = this.getFromCache(cacheKey);
+                    if (cachedData !== null) {
+                        // Return cached data immediately (deep clone to prevent mutation)
+                        return Promise.resolve(JSON.parse(JSON.stringify(cachedData)));
+                    }
+                }
+                
+                // ========================================
+                // ORIGINAL REQUEST LOGIC (Preserved)
+                // ========================================
+                // Add cache-busting parameter to prevent 304 responses (only for non-cached requests)
                 const separator = cleanEndpoint.includes('?') ? '&' : '?';
                 const url = `${this.baseURL}${cleanEndpoint}${separator}_t=${Date.now()}`;
                 
@@ -10489,8 +10710,17 @@
                     // Parse success response safely
                     const contentType = response.headers.get('content-type') || '';
                     if (contentType.includes('application/json')) {
-                    const data = await response.json();
-                    return data;
+                        const data = await response.json();
+                        
+                        // ========================================
+                        // CACHE SUCCESSFUL GET RESPONSES
+                        // ========================================
+                        if (isGetRequest) {
+                            const cacheKey = this.getCacheKey(cleanEndpoint, options);
+                            this.setCache(cacheKey, data);
+                        }
+                        
+                        return data;
                     } else {
                         const text = await response.text();
                         console.error('Unexpected non-JSON success response:', text.slice(0, 200));
@@ -10583,20 +10813,26 @@
             }
             
             async updateSettings(settings) {
-                return this.request('/settings', {
+                const response = await this.request('/settings', {
                     method: 'PUT',
                     body: JSON.stringify(settings)
                 });
+                // Invalidate settings cache
+                this.invalidateCache('/settings');
+                return response;
             }
 
             
             
             // Data Restore
             async restoreData(backupData) {
-                return this.request('/admin/restore', {
+                const response = await this.request('/admin/restore', {
                     method: 'POST',
                     body: JSON.stringify(backupData)
                 });
+                // Clear all cache after restore
+                this.clearAllCache();
+                return response;
             }
             
             // API Keys
@@ -10605,23 +10841,29 @@
             }
             
             async createApiKey(apiKeyData) {
-                return this.request('/api-keys', {
+                const response = await this.request('/api-keys', {
                     method: 'POST',
                     body: JSON.stringify(apiKeyData)
                 });
+                this.invalidateCache('/api-keys');
+                return response;
             }
             
             async updateApiKey(id, apiKeyData) {
-                return this.request(`/api-keys/${id}`, {
+                const response = await this.request(`/api-keys/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(apiKeyData)
                 });
+                this.invalidateCache('/api-keys');
+                return response;
             }
             
             async deleteApiKey(id) {
-                return this.request(`/api-keys/${id}`, {
+                const response = await this.request(`/api-keys/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/api-keys');
+                return response;
             }
             
             async getApiKeyStats(id) {
@@ -10634,23 +10876,29 @@
             }
             
             async createBranch(branch) {
-                return this.request('/branches', {
+                const response = await this.request('/branches', {
                     method: 'POST',
                     body: JSON.stringify(branch)
                 });
+                this.invalidateCache('/branches');
+                return response;
             }
             
             async updateBranch(id, branch) {
-                return this.request(`/branches/${id}`, {
+                const response = await this.request(`/branches/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(branch)
                 });
+                this.invalidateCache('/branches');
+                return response;
             }
             
             async deleteBranch(id) {
-                return this.request(`/branches/${id}`, {
+                const response = await this.request(`/branches/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/branches');
+                return response;
             }
             
             // Categories
@@ -10662,23 +10910,29 @@
             }
             
             async createCategory(category) {
-                return this.request('/categories', {
+                const response = await this.request('/categories', {
                     method: 'POST',
                     body: JSON.stringify(category)
                 });
+                this.invalidateCache('/categories');
+                return response;
             }
             
             async updateCategory(id, category) {
-                return this.request(`/categories/${id}`, {
+                const response = await this.request(`/categories/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(category)
                 });
+                this.invalidateCache('/categories');
+                return response;
             }
             
             async deleteCategory(id) {
-                return this.request(`/categories/${id}`, {
+                const response = await this.request(`/categories/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/categories');
+                return response;
             }
             
             // Suppliers
@@ -10687,23 +10941,29 @@
             }
             
             async createSupplier(supplier) {
-                return this.request('/suppliers', {
+                const response = await this.request('/suppliers', {
                     method: 'POST',
                     body: JSON.stringify(supplier)
                 });
+                this.invalidateCache('/suppliers');
+                return response;
             }
             
             async updateSupplier(id, supplier) {
-                return this.request(`/suppliers/${id}`, {
+                const response = await this.request(`/suppliers/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(supplier)
                 });
+                this.invalidateCache('/suppliers');
+                return response;
             }
             
             async deleteSupplier(id) {
-                return this.request(`/suppliers/${id}`, {
+                const response = await this.request(`/suppliers/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/suppliers');
+                return response;
             }
             
             // Sales
@@ -10723,23 +10983,35 @@
             }
             
             async createSale(sale) {
-                return this.request('/sales', {
+                const response = await this.request('/sales', {
                     method: 'POST',
                     body: JSON.stringify(sale)
                 });
+                // Invalidate sales cache and related data
+                this.invalidateCache('/sales');
+                this.invalidateCache('/department-sales');
+                return response;
             }
             
             async updateSale(id, sale) {
-                return this.request(`/sales/${id}`, {
+                const response = await this.request(`/sales/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(sale)
                 });
+                // Invalidate sales cache
+                this.invalidateCache('/sales');
+                this.invalidateCache('/department-sales');
+                return response;
             }
 
             async deleteSale(id) {
-                return this.request(`/sales/${id}`, {
+                const response = await this.request(`/sales/${id}`, {
                     method: 'DELETE'
                 });
+                // Invalidate sales cache
+                this.invalidateCache('/sales');
+                this.invalidateCache('/department-sales');
+                return response;
             }
             
             // Departments
@@ -10756,23 +11028,32 @@
             }
             
             async createDepartment(department) {
-                return this.request('/departments', {
+                const response = await this.request('/departments', {
                     method: 'POST',
                     body: JSON.stringify(department)
                 });
+                this.invalidateCache('/departments');
+                this.invalidateCache('/sub-departments');
+                return response;
             }
             
             async updateDepartment(id, department) {
-                return this.request(`/departments/${id}`, {
+                const response = await this.request(`/departments/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(department)
                 });
+                this.invalidateCache('/departments');
+                this.invalidateCache('/sub-departments');
+                return response;
             }
             
             async deleteDepartment(id) {
-                return this.request(`/departments/${id}`, {
+                const response = await this.request(`/departments/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/departments');
+                this.invalidateCache('/sub-departments');
+                return response;
             }
             
             // Sub-Departments
@@ -10793,23 +11074,32 @@
             }
             
             async createSubDepartment(subDepartment) {
-                return this.request('/sub-departments', {
+                const response = await this.request('/sub-departments', {
                     method: 'POST',
                     body: JSON.stringify(subDepartment)
                 });
+                this.invalidateCache('/sub-departments');
+                this.invalidateCache('/departments');
+                return response;
             }
             
             async updateSubDepartment(id, subDepartment) {
-                return this.request(`/sub-departments/${id}`, {
+                const response = await this.request(`/sub-departments/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(subDepartment)
                 });
+                this.invalidateCache('/sub-departments');
+                this.invalidateCache('/departments');
+                return response;
             }
             
             async deleteSubDepartment(id) {
-                return this.request(`/sub-departments/${id}`, {
+                const response = await this.request(`/sub-departments/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/sub-departments');
+                this.invalidateCache('/departments');
+                return response;
             }
             
             // Department Sales
@@ -10829,23 +11119,33 @@
             }
             
             async createDepartmentSale(sale) {
-                return this.request('/department-sales', {
+                const response = await this.request('/department-sales', {
                     method: 'POST',
                     body: JSON.stringify(sale)
                 });
+                // Invalidate department sales and regular sales cache
+                this.invalidateCache('/department-sales');
+                this.invalidateCache('/sales');
+                return response;
             }
             
             async updateDepartmentSale(id, sale) {
-                return this.request(`/department-sales/${id}`, {
+                const response = await this.request(`/department-sales/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(sale)
                 });
+                this.invalidateCache('/department-sales');
+                this.invalidateCache('/sales');
+                return response;
             }
             
             async deleteDepartmentSale(id) {
-                return this.request(`/department-sales/${id}`, {
+                const response = await this.request(`/department-sales/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/department-sales');
+                this.invalidateCache('/sales');
+                return response;
             }
             
             async getDepartmentSale(id) {
@@ -10900,17 +11200,23 @@
             }
             
             async createPayment(payment) {
-                return this.request('/payments', {
+                const response = await this.request('/payments', {
                     method: 'POST',
                     body: JSON.stringify(payment)
                 });
+                this.invalidateCache('/payments');
+                this.invalidateCache('/category-payments');
+                return response;
             }
             
             async createCategoryPayment(payment) {
-                return this.request('/category-payments', {
+                const response = await this.request('/category-payments', {
                     method: 'POST',
                     body: JSON.stringify(payment)
                 });
+                this.invalidateCache('/category-payments');
+                this.invalidateCache('/payments');
+                return response;
             }
             
             async getCategoryPayment(id) {
@@ -10918,29 +11224,41 @@
             }
             
             async updateCategoryPayment(id, payment) {
-                return this.request(`/category-payments/${id}`, {
+                const response = await this.request(`/category-payments/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(payment)
                 });
+                this.invalidateCache('/category-payments');
+                this.invalidateCache('/payments');
+                return response;
             }
             
             async deleteCategoryPayment(id) {
-                return this.request(`/category-payments/${id}`, {
+                const response = await this.request(`/category-payments/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/category-payments');
+                this.invalidateCache('/payments');
+                return response;
             }
             
             async updatePayment(id, payment) {
-                return this.request(`/payments/${id}`, {
+                const response = await this.request(`/payments/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(payment)
                 });
+                this.invalidateCache('/payments');
+                this.invalidateCache('/category-payments');
+                return response;
             }
             
             async deletePayment(id) {
-                return this.request(`/payments/${id}`, {
+                const response = await this.request(`/payments/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/payments');
+                this.invalidateCache('/category-payments');
+                return response;
             }
             
             async getPayment(id) {
@@ -10953,23 +11271,29 @@
             }
             
             async createGroup(group) {
-                return this.request('/groups', {
+                const response = await this.request('/groups', {
                     method: 'POST',
                     body: JSON.stringify(group)
                 });
+                this.invalidateCache('/groups');
+                return response;
             }
             
             async updateGroup(id, group) {
-                return this.request(`/groups/${id}`, {
+                const response = await this.request(`/groups/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(group)
                 });
+                this.invalidateCache('/groups');
+                return response;
             }
             
             async deleteGroup(id) {
-                return this.request(`/groups/${id}`, {
+                const response = await this.request(`/groups/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/groups');
+                return response;
             }
             
             // Users
@@ -10978,23 +11302,29 @@
             }
             
             async createUser(user) {
-                return this.request('/users', {
+                const response = await this.request('/users', {
                     method: 'POST',
                     body: JSON.stringify(user)
                 });
+                this.invalidateCache('/users');
+                return response;
             }
             
             async updateUser(id, user) {
-                return this.request(`/users/${id}`, {
+                const response = await this.request(`/users/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(user)
                 });
+                this.invalidateCache('/users');
+                return response;
             }
             
             async deleteUser(id) {
-                return this.request(`/users/${id}`, {
+                const response = await this.request(`/users/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/users');
+                return response;
             }
             
             // Employees
@@ -11007,23 +11337,29 @@
             }
             
             async createEmployee(employee) {
-                return this.request('/employees', {
+                const response = await this.request('/employees', {
                     method: 'POST',
                     body: JSON.stringify(employee)
                 });
+                this.invalidateCache('/employees');
+                return response;
             }
             
             async updateEmployee(id, employee) {
-                return this.request(`/employees/${id}`, {
+                const response = await this.request(`/employees/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(employee)
                 });
+                this.invalidateCache('/employees');
+                return response;
             }
             
             async deleteEmployee(id) {
-                return this.request(`/employees/${id}`, {
+                const response = await this.request(`/employees/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/employees');
+                return response;
             }
             
             // Employee Departments
@@ -11036,23 +11372,29 @@
             }
             
             async createEmployeeDepartment(department) {
-                return this.request('/employee-departments', {
+                const response = await this.request('/employee-departments', {
                     method: 'POST',
                     body: JSON.stringify(department)
                 });
+                this.invalidateCache('/employee-departments');
+                return response;
             }
             
             async updateEmployeeDepartment(id, department) {
-                return this.request(`/employee-departments/${id}`, {
+                const response = await this.request(`/employee-departments/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(department)
                 });
+                this.invalidateCache('/employee-departments');
+                return response;
             }
             
             async deleteEmployeeDepartment(id) {
-                return this.request(`/employee-departments/${id}`, {
+                const response = await this.request(`/employee-departments/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/employee-departments');
+                return response;
             }
             
             // Employee Designations
@@ -11065,23 +11407,29 @@
             }
             
             async createEmployeeDesignation(designation) {
-                return this.request('/employee-designations', {
+                const response = await this.request('/employee-designations', {
                     method: 'POST',
                     body: JSON.stringify(designation)
                 });
+                this.invalidateCache('/employee-designations');
+                return response;
             }
             
             async updateEmployeeDesignation(id, designation) {
-                return this.request(`/employee-designations/${id}`, {
+                const response = await this.request(`/employee-designations/${id}`, {
                     method: 'PUT',
                     body: JSON.stringify(designation)
                 });
+                this.invalidateCache('/employee-designations');
+                return response;
             }
             
             async deleteEmployeeDesignation(id) {
-                return this.request(`/employee-designations/${id}`, {
+                const response = await this.request(`/employee-designations/${id}`, {
                     method: 'DELETE'
                 });
+                this.invalidateCache('/employee-designations');
+                return response;
             }
         }
         
